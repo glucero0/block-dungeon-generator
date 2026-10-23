@@ -82,14 +82,30 @@ def _stamp_frame(samples):
     return samples
 
 
-def _trail_samples(mid_x, z0):
+def entrance_door_width(rect):
+    return min(6.4, max(4.8, rect.w * 0.4))
+
+
+def _trail_shape(rng):
+    """Seed-driven bend, wobble, and length for the worn trail."""
+    return {
+        'bend': rng.choice((-1, 1)),
+        'amp': rng.uniform(1.2, 4.0),
+        'wobble': rng.uniform(0.0, 1.1),
+        'phase': rng.uniform(0.0, math.pi * 2),
+        'length': rng.uniform(48.0, 68.0),
+    }
+
+
+def _trail_samples(mid_x, z0, shape):
     samples = []
     for index in range(PATH_SAMPLES + 1):
         t = index / PATH_SAMPLES
+        sway = math.sin(t * math.pi) * shape['amp'] + math.sin(t * math.pi * 2) * shape['wobble']
         samples.append({
-            'x': mid_x + math.sin(t * math.pi) * 1.65,
-            'z': z0 + t * PATH_LENGTH,
-            'half': PATH_WIDTH / 2 + math.sin(t * 8.4) * 0.42 + math.sin(t * 3.1 + 0.7) * 0.26,
+            'x': mid_x + shape['bend'] * sway,
+            'z': z0 + t * shape['length'],
+            'half': PATH_WIDTH / 2 + math.sin(t * 8.4 + shape['phase']) * 0.42 + math.sin(t * 3.1 + 0.7) * 0.26,
             't': t,
         })
     return _stamp_frame(samples)
@@ -173,12 +189,12 @@ def _vista_tree(sample, side, lateral, index, variant, scale_mul):
     }
 
 
-def _mountain_vista(end, hub):
+def _mountain_vista(end, hub, sway=-3.1):
     path = []
     for index in range(VISTA_STEPS + 1):
         t = index / VISTA_STEPS
         path.append({
-            'x': end['x'] + math.sin(t * math.pi) * -3.1,
+            'x': end['x'] + math.sin(t * math.pi) * sway,
             'z': end['z'] + t * VISTA_LENGTH,
             'half': end['half'] + (4.35 - end['half']) * t,
             't': t,
@@ -242,11 +258,11 @@ def _mountain_vista(end, hub):
     }
 
 
-def _scatter_trees(rng, samples):
+def _scatter_trees(rng, samples, count=30):
     trees = []
     end = samples[-1]
     guard = 0
-    while len(trees) < 30 and guard < 900:
+    while len(trees) < count and guard < 900:
         guard += 1
         if len(trees) > 2 and rng.random() < 0.62:
             anchor = trees[rng.randrange(0, len(trees))]
@@ -287,6 +303,87 @@ def _scatter_trees(rng, samples):
     return trees
 
 
+# type: (zone, scale range). Zones: 'court' is the flagged yard in front of the arch,
+# 'trail' is the verge beside the path, 'any' picks either.
+SCENERY_TYPES = {
+    'boulder': ('trail', (0.8, 1.9)),
+    'scrub': ('trail', (0.6, 1.3)),
+    'standing-stone': ('any', (0.9, 1.4)),
+    'gravestone': ('court', (0.8, 1.2)),
+    'fallen-column': ('court', (0.9, 1.3)),
+    'broken-statue': ('court', (0.9, 1.2)),
+    'rubble': ('court', (0.7, 1.3)),
+    'cart-wreck': ('trail', (0.9, 1.2)),
+    'campfire-ashes': ('trail', (0.8, 1.1)),
+    'supply-crate': ('trail', (0.8, 1.1)),
+    'signpost': ('trail', (0.9, 1.1)),
+}
+
+# Each dressing is a weighted mix of the types above.
+DRESSINGS = {
+    'overgrown': {'boulder': 4, 'standing-stone': 2, 'scrub': 5},
+    'graveyard': {'gravestone': 6, 'standing-stone': 1, 'scrub': 2, 'boulder': 1},
+    'fallen-hall': {'fallen-column': 4, 'broken-statue': 2, 'rubble': 3, 'boulder': 1, 'scrub': 2},
+    'abandoned-camp': {
+        'cart-wreck': 2, 'campfire-ashes': 2, 'supply-crate': 2, 'signpost': 1, 'scrub': 3, 'boulder': 1,
+    },
+}
+
+SCENERY_SPACING = 2.4
+SCENERY_TREE_GAP = 2.0
+
+
+def _scenery_spot(rng, zone, samples, court, mid_x, door_width):
+    if zone == 'any':
+        zone = 'court' if rng.random() < 0.4 else 'trail'
+    if zone == 'court':
+        side = -1 if rng.random() < 0.5 else 1
+        lane = door_width / 2 + 3.0
+        x = mid_x + side * rng.uniform(lane, court['w'] / 2 - 2.0)
+        z = court['z'] + rng.uniform(1.4, court['d'] - 1.4)
+        return x, z
+    sample = _point_on_trail(samples, 0.08 + rng.random() * 0.78)
+    side = -1 if rng.random() < 0.5 else 1
+    lateral = sample['half'] + TRAIL_CLEARANCE / 2 + 0.6 + rng.random() * 7
+    return sample['x'] + sample['nx'] * side * lateral, sample['z'] + sample['nz'] * side * lateral
+
+
+def _scatter_scenery(rng, samples, court, mid_x, door_width, trees, clutter):
+    """Ruin dressing around the approach. Returns (dressing name, items)."""
+    name = rng.choice(sorted(DRESSINGS))
+    mix = DRESSINGS[name]
+    types = sorted(mix)
+    weights = [mix[kind] for kind in types]
+    target = int(rng.randint(6, 16) * clutter * 2 + rng.random())
+    end = samples[-1]
+    items = []
+    attempts = 0
+    while len(items) < target and attempts < target * 20:
+        attempts += 1
+        kind = rng.choices(types, weights)[0]
+        zone, (lo, hi) = SCENERY_TYPES[kind]
+        x, z = _scenery_spot(rng, zone, samples, court, mid_x, door_width)
+        if _blocks_prop(samples, x, z):
+            continue
+        if z < court['z'] + 1 or z > end['z'] - 8:
+            continue
+        if any(math.hypot(item['x'] - x, item['z'] - z) < SCENERY_SPACING for item in items):
+            continue
+        if any(math.hypot(tree['x'] - x, tree['z'] - z) < SCENERY_TREE_GAP for tree in trees):
+            continue
+        item = {
+            'type': kind,
+            'x': round(x, 4),
+            'z': round(z, 4),
+            'rotationY': round(rng.uniform(0, math.pi * 2), 4),
+            'scale': round(rng.uniform(lo, hi), 3),
+        }
+        if kind == 'scrub':
+            item['variant'] = rng.randrange(0, 2)
+        items.append(item)
+    return name, items
+
+
 def _exterior(court, samples, vestibule):
     polygon = [
         [vestibule['x'], vestibule['z']],
@@ -324,17 +421,25 @@ def _preset(preset):
     }
 
 
-def build_approach(ante, rng):
-    """Return the outdoor fields for one antechamber rectangle."""
+def build_approach(ante, rng, clutter=0.5):
+    """Return the outdoor fields for one antechamber rectangle.
+
+    The trail bend, trail length, tree count, and ruin dressing all come from `rng`.
+    `clutter` (0 to 1) scales how much scenery is placed.
+    """
     rect = ante
     south_z = rect.z + rect.d
     mid_x = rect.x + rect.w / 2
-    door_width = min(6.4, max(4.8, rect.w * 0.4))
+    door_width = entrance_door_width(rect)
     court_w = rect.w + COURT_EXTRA * 2
     court = {'x': mid_x - court_w / 2, 'z': south_z, 'w': court_w, 'd': COURT_DEPTH}
-    samples = _trail_samples(mid_x, court['z'] + court['d'])
+    shape = _trail_shape(rng)
+    samples = _trail_samples(mid_x, court['z'] + court['d'], shape)
     end = samples[-1]
-    path = {'x': mid_x - PATH_WIDTH / 2, 'z': samples[0]['z'], 'w': PATH_WIDTH, 'd': PATH_LENGTH}
+    path = {'x': mid_x - PATH_WIDTH / 2, 'z': samples[0]['z'], 'w': PATH_WIDTH, 'd': shape['length']}
+    trees = _scatter_trees(rng, samples, rng.randint(18, 42))
+    dressing, scenery = _scatter_scenery(rng, samples, court, mid_x, door_width, trees, clutter)
+    vista_sway = -shape['bend'] * rng.uniform(2.0, 4.0)
     vestibule = {
         'x': mid_x - door_width / 2,
         'z': south_z - VESTIBULE_DEPTH,
@@ -362,7 +467,8 @@ def build_approach(ante, rng):
         'vestibule': _polygon(vestibule),
         'exterior': _exterior(court, samples, vestibule),
         'hub': _polygon(hub),
-        'trees': _scatter_trees(rng, samples),
+        'trees': trees,
+        'scenery': scenery,
         'zoneLabels': dict(ZONE_LABELS),
         'approach': {
             'shell': {
@@ -380,7 +486,8 @@ def build_approach(ante, rng):
             'corridorWidth': PATH_WIDTH + TRAIL_CLEARANCE,
             'lighting': 'day',
             'description': TRAIL_DESCRIPTION,
-            'vista': _mountain_vista(end, hub),
+            'dressing': dressing,
+            'vista': _mountain_vista(end, hub, vista_sway),
         },
         'transitions': [
             {

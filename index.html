@@ -1,0 +1,4230 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Dungeon JSON Map Visualizer</title>
+  <script type="importmap">
+  {
+    "imports": {
+      "three": "https://unpkg.com/three@0.170.0/build/three.module.js",
+      "three/addons/": "https://unpkg.com/three@0.170.0/examples/jsm/"
+    }
+  }
+  </script>
+  <!-- Tailwind CSS -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  <!-- Google Fonts & Phosphor Icons -->
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Cinzel:wght@500;700;900&family=JetBrains+Mono:wght@400;500;600&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <script src="https://unpkg.com/@phosphor-icons/web"></script>
+  <script>
+    tailwind.config = {
+      darkMode: 'class',
+      theme: {
+        extend: {
+          fontFamily: {
+            title: ['Cinzel', 'serif'],
+            mono: ['"JetBrains Mono"', 'monospace'],
+            sans: ['Inter', 'sans-serif'],
+          },
+          colors: {
+            dungeon: {
+              950: '#0a0c10',
+              900: '#11151c',
+              850: '#171c26',
+              800: '#1f2633',
+              700: '#2e384d',
+              accent: '#d4af37',
+              gold: '#facc15',
+              crimson: '#ef4444',
+              torch: '#f97316',
+              trail: '#854d0e',
+              stone: '#64748b',
+              glow: '#38bdf8'
+            }
+          }
+        }
+      }
+    }
+  </script>
+  <style>
+    /* Custom blueprint canvas and scrollbar styles */
+    body {
+      background-color: #0a0c10;
+      color: #e2e8f0;
+      user-select: none;
+    }
+    ::-webkit-scrollbar {
+      width: 6px;
+      height: 6px;
+    }
+    ::-webkit-scrollbar-track {
+      background: #11151c;
+    }
+    ::-webkit-scrollbar-thumb {
+      background: #2e384d;
+      border-radius: 3px;
+    }
+    ::-webkit-scrollbar-thumb:hover {
+      background: #475569;
+    }
+    .custom-canvas-cursor {
+      cursor: crosshair;
+    }
+    .custom-canvas-panning {
+      cursor: grabbing !important;
+    }
+    .glow-gold {
+      filter: drop-shadow(0 0 6px rgba(234, 179, 8, 0.45));
+    }
+    .glow-torch {
+      filter: drop-shadow(0 0 8px rgba(249, 115, 22, 0.6));
+    }
+  </style>
+</head>
+<body class="h-screen w-screen overflow-hidden flex flex-col font-sans">
+
+  <!-- Header Bar -->
+  <header class="h-14 bg-dungeon-900 border-b border-dungeon-800 px-4 flex items-center justify-between z-20 shrink-0">
+    <div class="flex items-center space-x-3">
+      <div class="w-8 h-8 rounded-lg bg-amber-500/10 border border-amber-500/30 flex items-center justify-center text-amber-400">
+        <i class="ph-bold ph-compass text-lg"></i>
+      </div>
+      <div>
+        <h1 class="font-title font-bold text-base tracking-wide text-amber-200/90 leading-tight">Dungeon Cartographer</h1>
+        <p class="text-[10px] font-mono text-slate-400 leading-tight" id="mapHeaderSubtitle">No Layout Loaded</p>
+      </div>
+    </div>
+
+    <!-- Quick Center Actions -->
+    <div class="flex items-center gap-2">
+      <!-- Search Room Dropdown -->
+      <div class="relative">
+        <div class="flex items-center bg-dungeon-950 border border-dungeon-700/60 rounded-md px-2.5 py-1.2 text-xs focus-within:border-amber-500/70 transition-colors">
+          <i class="ph ph-magnifying-glass text-slate-400 mr-2"></i>
+          <input type="text" id="searchInput" placeholder="Focus room or entity..." class="bg-transparent text-slate-200 outline-none w-44 font-mono text-[11px] placeholder:text-slate-500">
+          <button id="clearSearchBtn" class="text-slate-400 hover:text-white hidden"><i class="ph ph-x text-xs"></i></button>
+        </div>
+        <div id="searchResults" class="absolute top-full mt-1.5 left-0 w-64 bg-dungeon-900 border border-dungeon-700 rounded-md shadow-xl py-1 max-h-56 overflow-y-auto hidden z-50 font-mono text-xs"></div>
+      </div>
+
+      <div class="flex items-center bg-dungeon-850 border border-dungeon-700/70 rounded overflow-hidden" role="group" aria-label="View mode">
+        <button id="btnViewPlan" type="button" class="px-2.5 py-1.5 text-xs font-medium bg-amber-500/20 text-amber-200">Plan</button>
+        <button id="btnView3d" type="button" class="px-2.5 py-1.5 text-xs font-medium text-slate-300 hover:bg-dungeon-800">3D</button>
+      </div>
+
+      <!-- Floor selector: filled in by buildFloorSelector() when a layout has more than one floor -->
+      <div id="floorSelector" class="hidden flex items-center bg-dungeon-850 border border-dungeon-700/70 rounded overflow-hidden" role="group" aria-label="Floor"></div>
+
+      <!-- Zoom to Fit Button -->
+      <button id="btnFit" title="Fit Entire Map (Space)" class="px-2.5 py-1.5 bg-dungeon-850 hover:bg-dungeon-800 border border-dungeon-700/70 rounded text-xs text-slate-200 font-medium flex items-center gap-1.5 transition">
+        <i class="ph ph-arrows-out-cardinal"></i>
+        <span>Fit Map</span>
+      </button>
+
+      <!-- Zoom Controls -->
+      <div class="flex items-center bg-dungeon-850 border border-dungeon-700/70 rounded overflow-hidden">
+        <button id="btnZoomOut" class="px-2 py-1.5 text-slate-300 hover:text-white hover:bg-dungeon-800 transition"><i class="ph ph-minus"></i></button>
+        <span id="zoomLevelDisplay" class="px-2 font-mono text-[11px] text-amber-300/80 min-w-[50px] text-center">100%</span>
+        <button id="btnZoomIn" class="px-2 py-1.5 text-slate-300 hover:text-white hover:bg-dungeon-800 transition"><i class="ph ph-plus"></i></button>
+      </div>
+    </div>
+
+    <!-- Right Controls: Presets, Import, Raw JSON -->
+    <div class="flex items-center gap-2">
+      <button id="btnSample" class="px-3 py-1.5 bg-amber-500/10 hover:bg-amber-500/20 text-amber-300 border border-amber-500/40 rounded text-xs font-medium flex items-center gap-1.5 transition">
+        <i class="ph-bold ph-castle-turret"></i>
+        <span>Load Sample Ruins</span>
+      </button>
+
+      <label class="px-3 py-1.5 bg-dungeon-850 hover:bg-dungeon-800 text-slate-200 border border-dungeon-700/80 rounded text-xs font-medium flex items-center gap-1.5 transition cursor-pointer">
+        <i class="ph ph-upload-simple"></i>
+        <span>Upload .json</span>
+        <input type="file" id="fileUploadInput" accept=".json" class="hidden">
+      </label>
+
+      <button id="btnOpenPasteModal" class="px-3 py-1.5 bg-dungeon-850 hover:bg-dungeon-800 text-slate-200 border border-dungeon-700/80 rounded text-xs font-medium flex items-center gap-1.5 transition">
+        <i class="ph ph-code"></i>
+        <span>JSON Drawer</span>
+      </button>
+    </div>
+  </header>
+
+  <!-- Main Workspace -->
+  <div class="flex-1 flex overflow-hidden relative">
+
+    <!-- Left Floating Toolbar (Layer Toggles) -->
+    <aside class="absolute top-4 left-4 z-10 bg-dungeon-900/90 backdrop-blur-md border border-dungeon-700/70 rounded-lg p-3 shadow-2xl w-48 font-mono text-xs">
+      <div class="flex items-center justify-between border-b border-dungeon-800 pb-2 mb-2.5">
+        <span class="text-[11px] font-sans font-semibold tracking-wider text-slate-400 uppercase">Map Layers</span>
+        <i class="ph ph-stack text-slate-500"></i>
+      </div>
+      <div class="space-y-1.5 text-slate-300">
+        <label class="flex items-center justify-between cursor-pointer hover:text-white">
+          <span class="flex items-center gap-1.5"><span class="w-2.5 h-2.5 rounded-sm bg-slate-600"></span>Rooms</span>
+          <input type="checkbox" id="layerRooms" checked class="accent-amber-500 cursor-pointer">
+        </label>
+        <label class="flex items-center justify-between cursor-pointer hover:text-white">
+          <span class="flex items-center gap-1.5"><span class="w-2.5 h-2.5 rounded-sm bg-amber-700"></span>Outdoor / Trail</span>
+          <input type="checkbox" id="layerTrail" checked class="accent-amber-500 cursor-pointer">
+        </label>
+        <label class="flex items-center justify-between cursor-pointer hover:text-white">
+          <span class="flex items-center gap-1.5"><span class="w-2.5 h-2.5 rounded-sm bg-slate-400"></span>Sky &amp; Horizon</span>
+          <input type="checkbox" id="layerHorizon" checked class="accent-amber-500 cursor-pointer">
+        </label>
+        <label class="flex items-center justify-between cursor-pointer hover:text-white">
+          <span class="flex items-center gap-1.5"><span class="w-2.5 h-2.5 rounded-sm bg-stone-400"></span>Doors & Gates</span>
+          <input type="checkbox" id="layerDoors" checked class="accent-amber-500 cursor-pointer">
+        </label>
+        <label class="flex items-center justify-between cursor-pointer hover:text-white">
+          <span class="flex items-center gap-1.5"><span class="w-2.5 h-2.5 rounded-sm bg-orange-500"></span>Torches & Sconces</span>
+          <input type="checkbox" id="layerTorches" checked class="accent-amber-500 cursor-pointer">
+        </label>
+        <label class="flex items-center justify-between cursor-pointer hover:text-white">
+          <span class="flex items-center gap-1.5"><span class="w-2.5 h-2.5 rounded-sm bg-yellow-400"></span>Treasure Chests</span>
+          <input type="checkbox" id="layerChests" checked class="accent-amber-500 cursor-pointer">
+        </label>
+        <label class="flex items-center justify-between cursor-pointer hover:text-white">
+          <span class="flex items-center gap-1.5"><span class="w-2.5 h-2.5 rounded-sm bg-red-500"></span>Enemies & Boss</span>
+          <input type="checkbox" id="layerEnemies" checked class="accent-amber-500 cursor-pointer">
+        </label>
+        <label class="flex items-center justify-between cursor-pointer hover:text-white">
+          <span class="flex items-center gap-1.5"><span class="w-2.5 h-2.5 rounded-sm bg-emerald-600"></span>Props & Scenery</span>
+          <input type="checkbox" id="layerProps" checked class="accent-amber-500 cursor-pointer">
+        </label>
+        <label class="flex items-center justify-between cursor-pointer hover:text-white">
+          <span class="flex items-center gap-1.5"><span class="w-2.5 h-2.5 rounded-sm bg-sky-400"></span>Spawns / Triggers</span>
+          <input type="checkbox" id="layerSpawns" checked class="accent-amber-500 cursor-pointer">
+        </label>
+        <label class="flex items-center justify-between cursor-pointer hover:text-white pt-1 border-t border-dungeon-800">
+          <span class="flex items-center gap-1.5 text-slate-400"><i class="ph ph-grid-four"></i>Grid Lines</span>
+          <input type="checkbox" id="layerGrid" checked class="accent-amber-500 cursor-pointer">
+        </label>
+      </div>
+
+      <!-- Entrance and exit shortcuts: shown when the layout has them -->
+      <div id="landmarkPanel" class="hidden mt-3 pt-2 border-t border-dungeon-800 space-y-1.5">
+        <span class="text-[10px] font-sans font-semibold tracking-wider text-slate-400 uppercase block">Landmarks</span>
+        <button id="btnGoEntrance" type="button" class="w-full px-2 py-1 rounded border border-emerald-400/60 text-emerald-300 hover:bg-emerald-400/10 text-[11px] flex items-center justify-between transition">
+          <span>Entrance</span><span class="text-[9px] text-emerald-400/80">go to</span>
+        </button>
+        <button id="btnGoExit" type="button" class="w-full px-2 py-1 rounded border border-yellow-400/60 text-yellow-300 hover:bg-yellow-400/10 text-[11px] flex items-center justify-between transition">
+          <span>Exit</span><span class="text-[9px] text-yellow-400/80">go to</span>
+        </button>
+        <button id="btnGoExitTrail" type="button" class="hidden w-full px-2 py-1 rounded border border-yellow-400/60 text-yellow-300 hover:bg-yellow-400/10 text-[11px] flex items-center justify-between transition">
+          <span>Exit trail</span><span class="text-[9px] text-yellow-400/80">go to</span>
+        </button>
+        <button id="btnGoRespawn" type="button" class="hidden w-full px-2 py-1 rounded border border-sky-400/60 text-sky-300 hover:bg-sky-400/10 text-[11px] flex items-center justify-between transition">
+          <span>Respawn</span><span class="text-[9px] text-sky-400/80">go to</span>
+        </button>
+        <!-- One button per hub spoke, built from the file with textContent -->
+        <div id="spokeButtons" class="space-y-1.5"></div>
+      </div>
+
+      <!-- Quick stats preview -->
+      <div class="mt-3 pt-2 border-t border-dungeon-800 text-[10px] text-slate-400 space-y-0.5">
+        <div class="flex justify-between"><span>Rooms:</span><span id="statRooms" class="text-slate-200">0</span></div>
+        <div class="flex justify-between"><span>Skeletons:</span><span id="statEnemies" class="text-slate-200">0</span></div>
+        <div class="flex justify-between"><span>Chests:</span><span id="statChests" class="text-slate-200">0</span></div>
+        <div class="flex justify-between"><span>Torches:</span><span id="statTorches" class="text-slate-200">0</span></div>
+        <div class="flex justify-between"><span>Props:</span><span id="statProps" class="text-slate-200">0</span></div>
+      </div>
+    </aside>
+
+    <!-- Canvas Area -->
+    <main class="flex-1 h-full w-full relative bg-dungeon-950 overflow-hidden" id="canvasContainer">
+      <canvas id="mapCanvas" class="w-full h-full block custom-canvas-cursor"></canvas>
+      <canvas id="view3dCanvas" class="w-full h-full block hidden"></canvas>
+      <div id="view3dFallback" class="hidden absolute inset-0 z-20 flex items-center justify-center p-6">
+        <div class="max-w-md bg-dungeon-900/95 border border-amber-500/40 rounded-lg p-5 text-center shadow-2xl">
+          <p class="text-sm text-amber-100 font-medium">3D view could not start</p>
+          <p id="view3dFallbackText" class="text-xs text-slate-300 mt-2 leading-relaxed">Open this page through a local web server so Three.js can load. The plan view works either way.</p>
+          <button id="btnFallbackPlan" type="button" class="mt-4 px-3 py-1.5 bg-amber-500/20 text-amber-200 border border-amber-500/40 rounded text-xs">Back to plan</button>
+        </div>
+      </div>
+
+      <!-- Bottom Canvas Status Overlays -->
+      <div class="absolute bottom-3 left-4 z-10 pointer-events-none flex items-center gap-4 text-[11px] font-mono text-slate-400 bg-dungeon-900/80 px-3 py-1.5 rounded border border-dungeon-800 backdrop-blur">
+        <div>X: <span id="cursorCoordX" class="text-amber-300">0.0</span> m</div>
+        <div>Z: <span id="cursorCoordZ" class="text-amber-300">0.0</span> m</div>
+        <div class="text-slate-600">|</div>
+        <div class="text-slate-400">Grid: 1 unit = 1 meter</div>
+      </div>
+
+      <!-- Controls Hint -->
+    <div id="controlsHint" class="absolute bottom-3 right-[340px] z-10 pointer-events-none hidden md:block text-[10px] font-mono text-slate-500 bg-dungeon-900/60 px-2.5 py-1 rounded">
+      Drag: Pan | Scroll: Zoom | Click: Inspect
+    </div>
+
+    <!-- In-App Notification Toast (Replaces alerts) -->
+    <div id="toastNotification" class="absolute top-4 left-1/2 -translate-x-1/2 z-50 bg-red-950/95 border border-red-500/80 text-red-200 px-4 py-2.5 rounded-lg shadow-2xl backdrop-blur flex items-center gap-3 transition-all duration-300 opacity-0 pointer-events-none -translate-y-2">
+      <i class="ph-bold ph-warning-circle text-red-400 text-lg shrink-0"></i>
+      <div class="text-xs font-mono" id="toastMessage">Error message here</div>
+      <button id="toastCloseBtn" class="text-red-400 hover:text-white ml-2 text-xs font-bold pointer-events-auto">✕</button>
+    </div>
+  </main>
+
+  <!-- Right Sidebar Inspector -->
+    <aside class="w-80 bg-dungeon-900 border-l border-dungeon-800 flex flex-col z-10 shrink-0 font-sans shadow-2xl">
+      <div class="p-3 border-b border-dungeon-800 flex items-center justify-between">
+        <div class="flex items-center gap-2">
+          <i class="ph-bold ph-identification-card text-amber-400"></i>
+          <h2 class="text-xs font-semibold tracking-wider uppercase text-slate-300">Entity Inspector</h2>
+        </div>
+        <span id="inspectorCategory" class="px-2 py-0.5 rounded text-[10px] font-mono bg-dungeon-800 text-slate-400 uppercase">None</span>
+      </div>
+
+      <div class="flex-1 overflow-y-auto p-4 space-y-4" id="inspectorBody">
+        <!-- Default Empty State -->
+        <div id="inspectorEmptyState" class="text-center py-16 px-4">
+          <i class="ph ph-cursor-click text-3xl text-slate-600 mb-2 block"></i>
+          <p class="text-sm font-medium text-slate-400">No entity selected</p>
+          <p class="text-xs text-slate-500 mt-1">Click any room, skeleton, chest, or door on the map to inspect its data properties and coordinates.</p>
+        </div>
+
+        <!-- Populated Inspector Content (Hidden by default) -->
+        <div id="inspectorContent" class="space-y-4 hidden">
+          <div>
+            <span class="text-[10px] font-mono uppercase tracking-wider text-slate-500 block">Identifier / Name</span>
+            <h3 id="inspTitle" class="text-base font-bold text-amber-200 break-words font-title mt-0.5">West Reliquary</h3>
+            <p id="inspSubtitle" class="text-xs font-mono text-slate-400 mt-0.5">Type: standard_chamber</p>
+          </div>
+
+          <!-- Spatial Metrics Card -->
+          <div class="bg-dungeon-950/70 border border-dungeon-800 rounded-lg p-3 font-mono text-xs space-y-2">
+            <span class="text-[10px] font-sans font-semibold text-amber-400 uppercase tracking-wide block">Spatial Transform</span>
+            <div class="grid grid-cols-3 gap-2 text-center">
+              <div class="bg-dungeon-900 p-1.5 rounded border border-dungeon-800">
+                <span class="text-[9px] text-slate-500 block">X Position</span>
+                <span id="inspPosX" class="text-amber-300 font-bold">12.0</span>
+              </div>
+              <div class="bg-dungeon-900 p-1.5 rounded border border-dungeon-800">
+                <span class="text-[9px] text-slate-500 block">Elevation (Y)</span>
+                <span id="inspPosY" class="text-emerald-400 font-bold">-4.0</span>
+              </div>
+              <div class="bg-dungeon-900 p-1.5 rounded border border-dungeon-800">
+                <span class="text-[9px] text-slate-500 block">Z Position</span>
+                <span id="inspPosZ" class="text-amber-300 font-bold">-32.0</span>
+              </div>
+            </div>
+
+            <!-- Dimensions (if room or bounds exist) -->
+            <div id="inspDimensionsRow" class="grid grid-cols-3 gap-2 text-center pt-1">
+              <div class="bg-dungeon-900 p-1.5 rounded border border-dungeon-800">
+                <span class="text-[9px] text-slate-500 block">Width</span>
+                <span id="inspWidth" class="text-slate-300">8.0</span>
+              </div>
+              <div class="bg-dungeon-900 p-1.5 rounded border border-dungeon-800">
+                <span class="text-[9px] text-slate-500 block">Height</span>
+                <span id="inspHeight" class="text-slate-300">4.5</span>
+              </div>
+              <div class="bg-dungeon-900 p-1.5 rounded border border-dungeon-800">
+                <span class="text-[9px] text-slate-500 block">Depth</span>
+                <span id="inspDepth" class="text-slate-300">10.0</span>
+              </div>
+            </div>
+          </div>
+
+          <!-- Dynamic Key-Value Attribute Table -->
+          <div class="space-y-1.5">
+            <span class="text-[10px] font-sans font-semibold text-slate-400 uppercase tracking-wide block">Attributes</span>
+            <div id="inspAttributes" class="bg-dungeon-950/60 border border-dungeon-800 rounded-lg p-2.5 font-mono text-[11px] divide-y divide-dungeon-800">
+              <!-- Injected dynamically -->
+            </div>
+          </div>
+
+          <!-- Raw JSON Viewer for Node -->
+          <div class="space-y-1.5">
+            <div class="flex items-center justify-between">
+              <span class="text-[10px] font-sans font-semibold text-slate-400 uppercase tracking-wide">Raw Object Fragment</span>
+              <button id="btnCopyEntityJson" class="text-[10px] font-mono text-amber-400 hover:text-amber-300 flex items-center gap-1">
+                <i class="ph ph-copy"></i> Copy
+              </button>
+            </div>
+            <pre id="inspRawJson" class="bg-dungeon-950 border border-dungeon-800 rounded p-2.5 font-mono text-[10px] text-slate-300 overflow-x-auto max-h-48 leading-relaxed"></pre>
+          </div>
+        </div>
+      </div>
+
+      <!-- Inspector Footer -->
+      <div class="p-3 border-t border-dungeon-800 bg-dungeon-950/40 text-[11px] text-slate-400 flex justify-between items-center">
+        <span id="inspFloorTag">Floor: Level 1</span>
+        <button id="btnFocusSelected" class="px-2 py-1 bg-dungeon-800 hover:bg-dungeon-700 rounded text-amber-300 transition text-[11px] flex items-center gap-1">
+          <i class="ph ph-crosshair"></i> Focus Camera
+        </button>
+      </div>
+    </aside>
+  </div>
+
+  <!-- JSON Paste & Edit Drawer Modal -->
+  <div id="jsonModal" class="fixed inset-0 bg-black/80 backdrop-blur-sm z-50 flex items-center justify-center p-6 hidden">
+    <div class="bg-dungeon-900 border border-dungeon-700 rounded-xl w-full max-w-4xl max-h-[90vh] flex flex-col shadow-2xl overflow-hidden">
+      <div class="px-5 py-3.5 border-b border-dungeon-800 flex items-center justify-between bg-dungeon-850">
+        <div class="flex items-center gap-2">
+          <i class="ph ph-brackets-curly text-amber-400 text-lg"></i>
+          <h3 class="font-title text-sm font-bold text-amber-200">Load / Paste Dungeon Layout JSON</h3>
+        </div>
+        <button id="btnCloseModal" class="text-slate-400 hover:text-white p-1 rounded"><i class="ph ph-x text-lg"></i></button>
+      </div>
+
+      <div class="p-4 flex-1 flex flex-col min-h-0 bg-dungeon-950">
+        <div class="flex items-center justify-between mb-2">
+          <span class="text-xs text-slate-400 font-mono">Paste your <code class="text-amber-300">ancientRuinsData.json</code> contents below:</span>
+          <div class="flex gap-2">
+            <button id="btnFormatJson" class="px-2 py-1 bg-dungeon-800 hover:bg-dungeon-700 text-slate-300 rounded text-xs font-mono">Format JSON</button>
+            <button id="btnLoadExampleInModal" class="px-2 py-1 bg-amber-500/10 hover:bg-amber-500/20 text-amber-300 border border-amber-500/30 rounded text-xs font-mono">Fill Preset</button>
+          </div>
+        </div>
+        <textarea id="jsonEditorArea" class="flex-1 w-full bg-dungeon-900 border border-dungeon-700 rounded-lg p-3 font-mono text-xs text-slate-200 focus:outline-none focus:border-amber-500 resize-none overflow-y-auto leading-relaxed" placeholder="Paste { 'name': 'The Ancient Ruins', 'rooms': [...] } here..."></textarea>
+        <p id="jsonErrorBanner" class="text-xs font-mono text-red-400 mt-2 hidden flex items-center gap-1.5"><i class="ph ph-warning-circle"></i> <span>Invalid JSON syntax error.</span></p>
+      </div>
+
+      <div class="px-5 py-3 border-t border-dungeon-800 flex justify-end gap-3 bg-dungeon-850">
+        <button id="btnCancelModal" class="px-4 py-1.5 bg-dungeon-800 hover:bg-dungeon-700 text-slate-300 rounded text-xs font-medium transition">Cancel</button>
+        <button id="btnApplyJson" class="px-5 py-1.5 bg-amber-500 hover:bg-amber-400 text-dungeon-950 font-bold rounded text-xs transition shadow-lg shadow-amber-500/20">Render Layout</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Built-in Realistic Ancient Ruins Layout Data Specification -->
+  <script>
+    const SAMPLE_ANCIENT_RUINS_DATA = {
+      "name": "The Ancient Ruins",
+      "author": "Procedural Extract / Custom Layout",
+      "version": "1.2.0",
+      "environment": {
+        "timeOfDay": "daylight",
+        "weather": "pale sunlight, dry wind, drifting weak clouds",
+        "ambientSkyColor": "#93c5fd",
+        "groundColor": "#544636",
+        "stoneColor": "#334155"
+      },
+      "playerStart": {
+        "x": 0.0,
+        "y": 0.0,
+        "z": 38.0,
+        "facingYaw": 3.14159,
+        "locationName": "Worn Trail"
+      },
+      "trail": {
+        "id": "outdoor_approach",
+        "width": 4.5,
+        "points": [
+          { "x": 0, "z": 48 },
+          { "x": 1.2, "z": 36 },
+          { "x": -0.8, "z": 24 },
+          { "x": 0, "z": 12 },
+          { "x": 0, "z": 6 }
+        ]
+      },
+      "transitions": [
+        {
+          "id": "trans_ruin_entry",
+          "name": "Ruin Entry Threshold",
+          "sourceZone": "Worn Trail",
+          "targetZone": "Vestibule",
+          "triggerBox": { "x": 0, "y": 0, "z": 5.5, "w": 3.2, "d": 2.0, "h": 3.5 },
+          "type": "seamless_darken"
+        },
+        {
+          "id": "trans_mountain_pass",
+          "name": "Path to Jagged Pass",
+          "sourceZone": "Worn Trail",
+          "targetZone": "Overland Foothills",
+          "triggerBox": { "x": 0, "y": 0, "z": 48, "w": 6.0, "d": 2.5, "h": 3.0 },
+          "type": "world_hub_transition"
+        }
+      ],
+      "rooms": [
+        {
+          "id": "vestibule",
+          "name": "Entrance Vestibule",
+          "tier": "upper",
+          "floorY": 0.0,
+          "bounds": { "x": 0.0, "z": 1.0, "w": 6.0, "d": 7.0, "h": 4.0 },
+          "description": "Stone arch opening into a cool, desiccated receiving chamber."
+        },
+        {
+          "id": "upper_hall",
+          "name": "Upper Hall",
+          "tier": "upper",
+          "floorY": 0.0,
+          "bounds": { "x": 0.0, "z": -9.0, "w": 12.0, "d": 11.0, "h": 4.5 },
+          "description": "Central vaulted hall with dust-covered flagstones."
+        },
+        {
+          "id": "west_crypt",
+          "name": "West Crypt",
+          "tier": "upper",
+          "floorY": 0.0,
+          "bounds": { "x": -11.5, "z": -9.0, "w": 9.0, "d": 8.0, "h": 3.8 },
+          "description": "Old crypt lined with stone sarcophagi and cracked urns."
+        },
+        {
+          "id": "east_crypt",
+          "name": "East Crypt",
+          "tier": "upper",
+          "floorY": 0.0,
+          "bounds": { "x": 11.5, "z": -9.0, "w": 9.0, "d": 8.0, "h": 3.8 },
+          "description": "Burial chamber smelling of ancient dry mortar."
+        },
+        {
+          "id": "the_descent",
+          "name": "The Descent (Stairs)",
+          "tier": "stairwell",
+          "floorY": -2.5,
+          "bounds": { "x": 0.0, "z": -19.5, "w": 4.5, "d": 8.0, "h": 4.0 },
+          "description": "Worn stone steps descending into deep subterranean darkness."
+        },
+        {
+          "id": "lower_corridor",
+          "name": "Lower Corridor",
+          "tier": "lower",
+          "floorY": -5.0,
+          "bounds": { "x": 0.0, "z": -35.0, "w": 4.5, "d": 21.0, "h": 4.2 },
+          "description": "A long, oppressive hallway where minor tremors shake dust from the ceiling."
+        },
+        {
+          "id": "west_reliquary",
+          "name": "West Reliquary",
+          "tier": "lower",
+          "floorY": -5.0,
+          "bounds": { "x": -7.5, "z": -28.0, "w": 8.0, "d": 7.0, "h": 4.0 },
+          "description": "Vault containing discarded ceremonial urns."
+        },
+        {
+          "id": "east_reliquary",
+          "name": "East Reliquary",
+          "tier": "lower",
+          "floorY": -5.0,
+          "bounds": { "x": 7.5, "z": -28.0, "w": 8.0, "d": 7.0, "h": 4.0 },
+          "description": "Sealed reliquary guarded by skeletal sentinels."
+        },
+        {
+          "id": "west_cell",
+          "name": "West Cell",
+          "tier": "lower",
+          "floorY": -5.0,
+          "bounds": { "x": -7.5, "z": -40.0, "w": 8.0, "d": 7.5, "h": 4.0 },
+          "description": "Damp holding pen with broken shackles."
+        },
+        {
+          "id": "east_cell",
+          "name": "East Cell",
+          "tier": "lower",
+          "floorY": -5.0,
+          "bounds": { "x": 7.5, "z": -40.0, "w": 8.0, "d": 7.5, "h": 4.0 },
+          "description": "Stone chamber with crumbling ceiling cracks."
+        },
+        {
+          "id": "crypt_of_the_king",
+          "name": "Crypt of the Skeleton King",
+          "tier": "boss_arena",
+          "floorY": -5.0,
+          "bounds": { "x": 0.0, "z": -62.0, "w": 18.0, "d": 23.0, "h": 6.5 },
+          "description": "Massive coliseum-like crypt. Heavy pillars flank the throne, vibrating with rhythmic tremors."
+        }
+      ],
+      "doors": [
+        { "id": "door_arch", "name": "Entrance Arch", "x": 0.0, "y": 0.0, "z": 4.5, "w": 3.0, "h": 3.6, "state": "open", "type": "stone_portal" },
+        { "id": "door_vest_upper", "name": "Vestibule Doorway", "x": 0.0, "y": 0.0, "z": -3.5, "w": 2.8, "h": 3.2, "state": "open", "type": "passage" },
+        { "id": "door_upper_west", "name": "West Crypt Entry", "x": -6.0, "y": 0.0, "z": -9.0, "w": 2.2, "h": 3.0, "state": "open", "type": "stone_arch" },
+        { "id": "door_upper_east", "name": "East Crypt Entry", "x": 6.0, "y": 0.0, "z": -9.0, "w": 2.2, "h": 3.0, "state": "open", "type": "stone_arch" },
+        { "id": "door_stair_top", "name": "Stairwell Threshold", "x": 0.0, "y": 0.0, "z": -14.5, "w": 3.0, "h": 3.5, "state": "open", "type": "passage" },
+        { "id": "door_stair_bottom", "name": "Lower Hall Threshold", "x": 0.0, "y": -5.0, "z": -23.5, "w": 3.0, "h": 3.5, "state": "open", "type": "passage" },
+        { "id": "door_lower_w_rel", "name": "West Reliquary Entry", "x": -2.25, "y": -5.0, "z": -28.0, "w": 2.0, "h": 2.8, "state": "open", "type": "iron_grate" },
+        { "id": "door_lower_e_rel", "name": "East Reliquary Entry", "x": 2.25, "y": -5.0, "z": -28.0, "w": 2.0, "h": 2.8, "state": "open", "type": "iron_grate" },
+        { "id": "door_lower_w_cell", "name": "West Cell Entry", "x": -2.25, "y": -5.0, "z": -40.0, "w": 2.0, "h": 2.8, "state": "open", "type": "doorway" },
+        { "id": "door_lower_e_cell", "name": "East Cell Entry", "x": 2.25, "y": -5.0, "z": -40.0, "w": 2.0, "h": 2.8, "state": "open", "type": "doorway" },
+        {
+          "id": "boss_double_doors",
+          "name": "The King's Portal (Heavy Double Doors)",
+          "x": 0.0,
+          "y": -5.0,
+          "z": -46.5,
+          "w": 3.8,
+          "h": 4.2,
+          "state": "closed",
+          "type": "boss_gate",
+          "interactionKey": "LMB",
+          "lockedMessage": "The heavy ironbound slabs grind on their hinges when struck."
+        }
+      ],
+      "torches": [
+        { "id": "torch_arch_l", "x": -2.2, "y": 1.8, "z": 4.5, "wall": "south", "room": "vestibule", "radius": 4.5 },
+        { "id": "torch_arch_r", "x": 2.2, "y": 1.8, "z": 4.5, "wall": "south", "room": "vestibule", "radius": 4.5 },
+        { "id": "torch_upper_1", "x": -5.8, "y": 1.8, "z": -5.0, "wall": "west", "room": "upper_hall", "radius": 5.0 },
+        { "id": "torch_upper_2", "x": 5.8, "y": 1.8, "z": -5.0, "wall": "east", "room": "upper_hall", "radius": 5.0 },
+        { "id": "torch_upper_3", "x": -5.8, "y": 1.8, "z": -13.0, "wall": "west", "room": "upper_hall", "radius": 5.0 },
+        { "id": "torch_upper_4", "x": 5.8, "y": 1.8, "z": -13.0, "wall": "east", "room": "upper_hall", "radius": 5.0 },
+        { "id": "torch_corr_1", "x": -2.1, "y": -3.2, "z": -26.0, "wall": "west", "room": "lower_corridor", "radius": 4.0 },
+        { "id": "torch_corr_2", "x": 2.1, "y": -3.2, "z": -32.0, "wall": "east", "room": "lower_corridor", "radius": 4.0 },
+        { "id": "torch_corr_3", "x": -2.1, "y": -3.2, "z": -38.0, "wall": "west", "room": "lower_corridor", "radius": 4.0 },
+        { "id": "torch_corr_4", "x": 2.1, "y": -3.2, "z": -44.0, "wall": "east", "room": "lower_corridor", "radius": 4.0 },
+        { "id": "torch_boss_gate_l", "x": -2.2, "y": -3.2, "z": -46.2, "wall": "south", "room": "lower_corridor", "radius": 4.0 },
+        { "id": "torch_boss_gate_r", "x": 2.2, "y": -3.2, "z": -46.2, "wall": "south", "room": "lower_corridor", "radius": 4.0 },
+        { "id": "torch_arena_nw", "x": -8.5, "y": -3.0, "z": -55.0, "wall": "west", "room": "crypt_of_the_king", "radius": 6.5 },
+        { "id": "torch_arena_ne", "x": 8.5, "y": -3.0, "z": -55.0, "wall": "east", "room": "crypt_of_the_king", "radius": 6.5 },
+        { "id": "torch_arena_sw", "x": -8.5, "y": -3.0, "z": -69.0, "wall": "west", "room": "crypt_of_the_king", "radius": 6.5 },
+        { "id": "torch_arena_se", "x": 8.5, "y": -3.0, "z": -69.0, "wall": "east", "room": "crypt_of_the_king", "radius": 6.5 }
+      ],
+      "chests": [
+        {
+          "id": "chest_west_crypt",
+          "name": "Ancient Crypt Cache",
+          "x": -14.5,
+          "y": 0.0,
+          "z": -9.0,
+          "room": "west_crypt",
+          "lootTier": "minor",
+          "gold": 35,
+          "state": "unopened"
+        },
+        {
+          "id": "chest_east_crypt",
+          "name": "Desiccated Footlocker",
+          "x": 14.5,
+          "y": 0.0,
+          "z": -9.0,
+          "room": "east_crypt",
+          "lootTier": "minor",
+          "gold": 40,
+          "state": "unopened"
+        },
+        {
+          "id": "chest_west_reliquary",
+          "name": "Reliquary Strongbox",
+          "x": -10.0,
+          "y": -5.0,
+          "z": -28.0,
+          "room": "west_reliquary",
+          "lootTier": "moderate",
+          "gold": 65,
+          "state": "unopened"
+        },
+        {
+          "id": "chest_east_cell",
+          "name": "Prisoner's Hidden Cache",
+          "x": 10.0,
+          "y": -5.0,
+          "z": -40.0,
+          "room": "east_cell",
+          "lootTier": "moderate",
+          "gold": 50,
+          "state": "unopened"
+        },
+        {
+          "id": "grand_boss_chest",
+          "name": "The Skeleton King's Treasury",
+          "x": 0.0,
+          "y": -5.0,
+          "z": -71.5,
+          "room": "crypt_of_the_king",
+          "lootTier": "boss_master",
+          "gold": 250,
+          "state": "unopened",
+          "specialLoot": "Crown of the Ruin King"
+        }
+      ],
+      "enemies": [
+        { "id": "skel_w_crypt_1", "type": "skeleton_warrior", "name": "Crypt Sentry", "x": -11.0, "y": 0.0, "z": -7.5, "room": "west_crypt", "weapon": "mace", "hp": 45 },
+        { "id": "skel_e_crypt_1", "type": "skeleton_warrior", "name": "Crypt Sentry", "x": 11.0, "y": 0.0, "z": -7.5, "room": "east_crypt", "weapon": "sword", "hp": 45 },
+        { "id": "skel_w_rel_1", "type": "skeleton_warrior", "name": "Reliquary Guard", "x": -7.0, "y": -5.0, "z": -26.5, "room": "west_reliquary", "weapon": "sword", "hp": 55 },
+        { "id": "skel_w_rel_2", "type": "skeleton_warrior", "name": "Reliquary Guard", "x": -8.5, "y": -5.0, "z": -29.5, "room": "west_reliquary", "weapon": "shield_mace", "hp": 60 },
+        { "id": "skel_e_rel_1", "type": "skeleton_warrior", "name": "Reliquary Guard", "x": 7.0, "y": -5.0, "z": -26.5, "room": "east_reliquary", "weapon": "sword", "hp": 55 },
+        { "id": "skel_e_rel_2", "type": "skeleton_archer", "name": "Bone Sharpshooter", "x": 9.0, "y": -5.0, "z": -29.5, "room": "east_reliquary", "weapon": "bone_bow", "hp": 40 },
+        { "id": "skel_w_cell_1", "type": "skeleton_warrior", "name": "Dungeon Thrall", "x": -8.0, "y": -5.0, "z": -40.0, "room": "west_cell", "weapon": "club", "hp": 40 },
+        { "id": "skel_e_cell_1", "type": "skeleton_warrior", "name": "Dungeon Thrall", "x": 8.0, "y": -5.0, "z": -40.0, "room": "east_cell", "weapon": "club", "hp": 40 },
+        { "id": "skel_arena_guard_l", "type": "skeleton_warrior", "name": "Royal Bodyguard", "x": -4.5, "y": -5.0, "z": -58.0, "room": "crypt_of_the_king", "weapon": "greatsword", "hp": 80 },
+        { "id": "skel_arena_guard_r", "type": "skeleton_warrior", "name": "Royal Bodyguard", "x": 4.5, "y": -5.0, "z": -58.0, "room": "crypt_of_the_king", "weapon": "greatsword", "hp": 80 },
+        { "id": "skel_arena_guard_c", "type": "skeleton_archer", "name": "Royal Marksman", "x": 0.0, "y": -5.0, "z": -60.0, "room": "crypt_of_the_king", "weapon": "composite_bow", "hp": 65 },
+        {
+          "id": "boss_skeleton_king",
+          "type": "boss_skeleton_king",
+          "name": "Skeleton King",
+          "isBoss": true,
+          "x": 0.0,
+          "y": -5.0,
+          "z": -67.0,
+          "scale": 1.45,
+          "room": "crypt_of_the_king",
+          "weapon": "Royal Greataxe",
+          "crown": "Jagged Gold Circlet",
+          "hp": 420,
+          "tremorInducer": true,
+          "description": "A towering skeletal conqueror donning an ancient crown. Ground shakes when he charges."
+        }
+      ],
+      "decor": [
+        { "type": "dead_tree", "x": -3.5, "z": 15 },
+        { "type": "dead_tree", "x": 4.2, "z": 18 },
+        { "type": "dead_tree", "x": -5.0, "z": 28 },
+        { "type": "dead_tree", "x": 5.5, "z": 32 },
+        { "type": "dead_tree", "x": -4.0, "z": 42 },
+        { "type": "dead_tree", "x": 4.8, "z": 44 },
+        { "type": "sarcophagus", "x": -13.5, "y": 0.0, "z": -7.0, "room": "west_crypt" },
+        { "type": "sarcophagus", "x": 13.5, "y": 0.0, "z": -7.0, "room": "east_crypt" },
+        { "type": "urn_cluster", "x": -9.5, "y": -5.0, "z": -26.0, "room": "west_reliquary" },
+        { "type": "urn_cluster", "x": 9.5, "y": -5.0, "z": -26.0, "room": "east_reliquary" }
+      ]
+    };
+  </script>
+
+  <!-- Interactive Visualizer Logic -->
+  <script>
+    // State Management
+    // `fullDungeonData` is everything in the file. `dungeonData` is what is shown now:
+    // the same data, or one floor of it when a floor is picked in the header.
+    let fullDungeonData = null;
+    let dungeonData = null;
+    let activeFloor = null;
+    let selectedEntity = null;
+    let hoveredEntity = null;
+    let viewMode = 'plan';
+    let view3d = null;
+
+    // Viewport transform state
+    const view = {
+      x: 0,
+      y: 0,
+      scale: 12.0, // pixels per meter
+      minScale: 1.0,
+      maxScale: 80.0,
+      isPanning: false,
+      lastMouseX: 0,
+      lastMouseY: 0
+    };
+
+    // Canvas references
+    const canvas = document.getElementById('mapCanvas');
+    const ctx = canvas.getContext('2d');
+    const container = document.getElementById('canvasContainer');
+
+    // UI Toast Helper
+    const toast = document.getElementById('toastNotification');
+    const toastMessage = document.getElementById('toastMessage');
+    const toastCloseBtn = document.getElementById('toastCloseBtn');
+    let toastTimeout = null;
+
+    function showToast(msg, isError = true) {
+      if (toastTimeout) clearTimeout(toastTimeout);
+      toastMessage.textContent = msg;
+      toast.className = `absolute top-4 left-1/2 -translate-x-1/2 z-50 px-4 py-2.5 rounded-lg shadow-2xl backdrop-blur flex items-center gap-3 transition-all duration-300 opacity-100 pointer-events-auto translate-y-0 ${
+        isError ? 'bg-red-950/95 border border-red-500/80 text-red-200' : 'bg-emerald-950/95 border border-emerald-500/80 text-emerald-200'
+      }`;
+      toastTimeout = setTimeout(hideToast, 6000);
+    }
+    function hideToast() {
+      toast.classList.add('opacity-0', '-translate-y-2', 'pointer-events-none');
+    }
+    toastCloseBtn.addEventListener('click', hideToast);
+
+    // --------------------------------------------------------------------------
+    // Universal Robust Schema Normalizer
+    // Accepts any shape your 3D engine produces without crashing on undefined 'x'
+    // --------------------------------------------------------------------------
+    function num(value, fallback = 0) {
+      const n = Number(value);
+      return Number.isFinite(n) ? n : fallback;
+    }
+
+    // A #rrggbb from the file. Anything else keeps the fallback so a bad string cannot throw.
+    function hexColor(value, fallback) {
+      return typeof value === 'string' && /^#[0-9a-fA-F]{6}$/.test(value)
+        ? parseInt(value.slice(1), 16)
+        : fallback;
+    }
+
+    // Landmarks: the antechamber behind the arch and the final chamber. The generator marks them
+    // with `role: 'antechamber'` and `role: 'exit'` (and `block: 'entrance'` / `'exit'`).
+    const MARKER_STYLES = {
+      entrance: { label: 'ENTRANCE', stroke: '#34d399', fill: '#0f2a22', hex: 0x34d399, floor: 0x14532d },
+      exit: { label: 'EXIT', stroke: '#facc15', fill: '#2d2508', hex: 0xfacc15, floor: 0x854d0e }
+    };
+
+    function roomMarker(room) {
+      if (!room) return null;
+      if (room.role === 'exit' || room.block === 'exit') return 'exit';
+      if (room.role === 'antechamber' || room.block === 'entrance') return 'entrance';
+      return null;
+    }
+
+    // Floors: the generator stacks stories 10 m apart.
+    const STORY_HEIGHT = 10;
+
+    function floorOfY(y) {
+      return Math.round(num(y) / STORY_HEIGHT) + 0;
+    }
+
+    function itemFloors(item) {
+      if (Array.isArray(item.floors)) return item.floors;
+      return [floorOfY(item.floorY ?? item.y ?? 0)];
+    }
+
+    function listFloors(data) {
+      const found = new Set();
+      (data?.rooms || []).forEach((room) => itemFloors(room).forEach((floor) => found.add(floor)));
+      return [...found].sort((a, b) => a - b);
+    }
+
+    // One floor of the layout. Stairwells span two floors, so they show on both.
+    // The trail and scenery sit on the ground floor. A transition uses its own floor,
+    // so the exit gate's trigger stays with the exit chamber.
+    function filterByFloor(data, floor) {
+      if (!data || floor === null) return data;
+      const keep = (list) => (Array.isArray(list) ? list.filter((item) => item && itemFloors(item).includes(floor)) : []);
+      const ground = floor === 0;
+      return {
+        ...data,
+        hub: ground ? data.hub : null,
+        rooms: keep(data.rooms),
+        doors: keep(data.doors),
+        torches: keep(data.torches),
+        chests: keep(data.chests),
+        enemies: keep(data.enemies),
+        props: keep(data.props),
+        outdoor: ground ? data.outdoor : [],
+        decor: ground ? data.decor : [],
+        scenery: ground ? data.scenery : [],
+        distance: ground ? data.distance : [],
+        sky: ground ? data.sky : null,
+        transitions: keep(data.transitions),
+        playerStart: ground ? data.playerStart : null,
+        trail: ground ? data.trail : null
+      };
+    }
+
+    function polygonFromCornerRect(rect) {
+      const x = num(rect?.x);
+      const z = num(rect?.z);
+      const w = num(rect?.w ?? rect?.width, 1);
+      const d = num(rect?.d ?? rect?.depth, 1);
+      return [[x, z], [x + w, z], [x + w, z + d], [x, z + d]];
+    }
+
+    // A path of centre samples with a half-width and a side normal, closed into a ribbon.
+    function polygonFromRibbon(samples) {
+      if (!Array.isArray(samples) || samples.length < 2) return [];
+      const left = [];
+      const right = [];
+      samples.forEach((sample) => {
+        if (!sample) return;
+        const x = num(sample.x, NaN);
+        const z = num(sample.z, NaN);
+        if (!Number.isFinite(x) || !Number.isFinite(z)) return;
+        const half = Math.max(0.4, num(sample.half, 2));
+        let nx = num(sample.nx, NaN);
+        let nz = num(sample.nz, NaN);
+        if (!Number.isFinite(nx) || !Number.isFinite(nz)) {
+          nx = 1;
+          nz = 0;
+        }
+        left.push([x + nx * half, z + nz * half]);
+        right.push([x - nx * half, z - nz * half]);
+      });
+      if (left.length < 2) return [];
+      return left.concat(right.reverse());
+    }
+
+    function treeRecord(tree, index, idPrefix) {
+      return {
+        ...tree,
+        id: tree.id || `${idPrefix}-${index}`,
+        type: 'dead_tree',
+        name: `Dead Tree ${index + 1}`,
+        x: num(tree.x),
+        y: 0,
+        z: num(tree.z),
+        height: num(tree.height, 5),
+        scale: num(tree.scale, 1)
+      };
+    }
+
+    function sceneryRecord(item, index, idPrefix) {
+      const type = String(item.type || 'scenery');
+      const label = typeof item.label === 'string' ? item.label : '';
+      return {
+        id: `${idPrefix}-${index}`,
+        name: label ? `${propLabel(type)}: ${label}` : propLabel(type),
+        type,
+        x: num(item.x),
+        y: 0,
+        z: num(item.z),
+        rotationY: num(item.rotationY),
+        scale: num(item.scale, 1),
+        variant: item.variant,
+        label: label || undefined
+      };
+    }
+
+    function polygonFromCenterBounds(bounds) {
+      const x = num(bounds?.x);
+      const z = num(bounds?.z);
+      const w = num(bounds?.w, 6);
+      const d = num(bounds?.d, 6);
+      return [
+        [x - w / 2, z - d / 2],
+        [x + w / 2, z - d / 2],
+        [x + w / 2, z + d / 2],
+        [x - w / 2, z + d / 2]
+      ];
+    }
+
+    function sanitizePolygon(points) {
+      if (!Array.isArray(points)) return [];
+      const poly = [];
+      for (const point of points) {
+        let x = NaN;
+        let z = NaN;
+        if (Array.isArray(point) && point.length >= 2) {
+          x = num(point[0], NaN);
+          z = num(point[1], NaN);
+        } else if (point && typeof point === 'object') {
+          x = num(point.x, NaN);
+          z = num(point.z ?? point.y, NaN);
+        }
+        if (Number.isFinite(x) && Number.isFinite(z)) poly.push([x, z]);
+      }
+      if (poly.length >= 2) {
+        const first = poly[0];
+        const last = poly[poly.length - 1];
+        if (Math.hypot(first[0] - last[0], first[1] - last[1]) < 1e-4) poly.pop();
+      }
+      return poly.length >= 3 ? poly : [];
+    }
+
+    function boundsFromPolygon(polygon, y = 0, h = 10) {
+      let minX = Infinity;
+      let maxX = -Infinity;
+      let minZ = Infinity;
+      let maxZ = -Infinity;
+      for (const [x, z] of polygon) {
+        minX = Math.min(minX, x);
+        maxX = Math.max(maxX, x);
+        minZ = Math.min(minZ, z);
+        maxZ = Math.max(maxZ, z);
+      }
+      return {
+        minX, maxX, minZ, maxZ,
+        x: (minX + maxX) / 2,
+        z: (minZ + maxZ) / 2,
+        y,
+        w: Math.max(0.25, maxX - minX),
+        d: Math.max(0.25, maxZ - minZ),
+        h
+      };
+    }
+
+    function pointInPolygon(x, z, polygon) {
+      if (!polygon || polygon.length < 3) return false;
+      let inside = false;
+      for (let i = 0, j = polygon.length - 1; i < polygon.length; j = i++) {
+        const xi = polygon[i][0];
+        const zi = polygon[i][1];
+        const xj = polygon[j][0];
+        const zj = polygon[j][1];
+        const denom = (zj - zi) || 1e-12;
+        const intersect = ((zi > z) !== (zj > z)) && (x < ((xj - xi) * (z - zi)) / denom + xi);
+        if (intersect) inside = !inside;
+      }
+      return inside;
+    }
+
+    function distanceToSegment(px, pz, ax, az, bx, bz) {
+      const dx = bx - ax;
+      const dz = bz - az;
+      const len2 = dx * dx + dz * dz;
+      if (len2 < 1e-10) return Math.hypot(px - ax, pz - az);
+      const t = Math.max(0, Math.min(1, ((px - ax) * dx + (pz - az) * dz) / len2));
+      return Math.hypot(px - (ax + t * dx), pz - (az + t * dz));
+    }
+
+    function isHarperLayout(raw) {
+      // A hub with a campfire has no rooms, so it is recognised by its kind.
+      if (raw?.kind === 'hub' && raw.hubArea && typeof raw.hubArea === 'object') return true;
+      const rooms = Array.isArray(raw?.rooms) ? raw.rooms : [];
+      const doors = Array.isArray(raw?.doors) ? raw.doors : [];
+      const hasPolygon = rooms.some((room) => Array.isArray(room?.polygon) && room.polygon.length >= 3);
+      const hasCornerRect = rooms.some((room) => room?.rect && room.bounds == null && room.rect.w != null && room.rect.d != null);
+      const hasSegments = doors.some((door) => Array.isArray(door?.a) && Array.isArray(door?.b));
+      return (hasPolygon || hasCornerRect) && (hasSegments || hasPolygon);
+    }
+
+    function singularEnemyName(name) {
+      const label = name || 'Skeletal Warrior';
+      return label.endsWith('s') ? label.slice(0, -1) : label;
+    }
+
+    function segmentDoor(door, index, roomNames) {
+      const a = [num(door.a[0]), num(door.a[1])];
+      const b = [num(door.b[0]), num(door.b[1])];
+      const from = door.from || '';
+      const to = door.to || '';
+      const fromName = roomNames.get(from) || from;
+      const toName = roomNames.get(to) || to;
+      const name = door.name || (fromName && toName ? `${fromName} → ${toName}` : `Opening ${index + 1}`);
+      const length = Math.hypot(b[0] - a[0], b[1] - a[1]);
+      return {
+        ...door,
+        id: door.id || `door_${index}`,
+        name,
+        from,
+        to,
+        a,
+        b,
+        x: (a[0] + b[0]) / 2,
+        y: num(door.y),
+        floors: [floorOfY(door.y)],
+        z: (a[1] + b[1]) / 2,
+        w: length || num(door.width, 2),
+        height: num(door.height, 7),
+        openingWidth: num(door.openingWidth, length || 2),
+        state: door.state || 'open',
+        type: door.type || 'passage'
+      };
+    }
+
+    function normalizeHarperLayout(raw) {
+      const roomNames = new Map();
+      const rooms = [];
+      const rawRooms = Array.isArray(raw.rooms) ? raw.rooms : [];
+      rawRooms.forEach((room, index) => {
+        if (!room) return;
+        const polygon = sanitizePolygon(room.polygon);
+        const footprint = polygon.length ? polygon : (room.rect ? polygonFromCornerRect(room.rect) : []);
+        if (footprint.length < 3) return;
+        const kind = room.kind || 'chamber';
+        const floorY = num(room.y);
+        const floor = Number.isInteger(room.floor) ? room.floor : floorOfY(floorY);
+        const storyHeight = num(room.storyHeight, STORY_HEIGHT);
+        const spans = Math.max(1, Math.min(8, Math.round(storyHeight / STORY_HEIGHT)));
+        const normalizedRoom = {
+          ...room,
+          id: room.id || `room_${index}`,
+          name: room.name || room.id || `Chamber ${index + 1}`,
+          kind,
+          tier: kind,
+          floorY,
+          floor,
+          floors: Array.from({ length: spans }, (_, step) => floor + step),
+          storyHeight,
+          polygon: footprint,
+          bounds: boundsFromPolygon(footprint, floorY, storyHeight),
+          theme: room.theme || 'stone'
+        };
+        rooms.push(normalizedRoom);
+        roomNames.set(normalizedRoom.id, normalizedRoom.name);
+      });
+
+      const doors = [];
+      (Array.isArray(raw.doors) ? raw.doors : []).forEach((door, index) => {
+        if (!door || !Array.isArray(door.a) || !Array.isArray(door.b)) return;
+        doors.push(segmentDoor(door, index, roomNames));
+      });
+      if (raw.entrance && Array.isArray(raw.entrance.a) && Array.isArray(raw.entrance.b)) {
+        doors.push(segmentDoor({
+          ...raw.entrance,
+          id: raw.entrance.id || 'entrance',
+          name: raw.entrance.name || 'Entrance Arch',
+          type: raw.entrance.type || 'stone_portal'
+        }, doors.length, roomNames));
+      }
+      if (raw.exitGate && Array.isArray(raw.exitGate.a) && Array.isArray(raw.exitGate.b)) {
+        doors.push(segmentDoor({
+          ...raw.exitGate,
+          id: raw.exitGate.id || 'exit-gate',
+          name: raw.exitGate.name || 'Exit Gate',
+          type: raw.exitGate.type || 'stone_portal'
+        }, doors.length, roomNames));
+      }
+      const exitArch = raw.exitArea && raw.exitArea.arch;
+      if (exitArch && Array.isArray(exitArch.a) && Array.isArray(exitArch.b)) {
+        doors.push(segmentDoor({
+          ...exitArch,
+          id: exitArch.id || 'exit-arch',
+          name: exitArch.name || 'Exit Arch',
+          type: exitArch.type || 'stone_portal',
+          y: num(exitArch.y)
+        }, doors.length, roomNames));
+      }
+
+      const torches = [];
+      const chests = [];
+      const enemies = [];
+      const enemyName = singularEnemyName(raw.enemyName);
+      rooms.forEach((room) => {
+        (Array.isArray(room.spawns) ? room.spawns : []).forEach((point, index) => {
+          const x = Array.isArray(point) ? num(point[0]) : num(point?.x);
+          const z = Array.isArray(point) ? num(point[1]) : num(point?.z);
+          enemies.push({
+            id: `${room.id}-spawn-${index}`,
+            name: enemyName,
+            type: 'skeleton_warrior',
+            x, y: room.floorY, z,
+            floors: room.floors,
+            room: room.id,
+            hp: 45,
+            isBoss: false
+          });
+        });
+        if (room.sconce && room.sconce.x != null && room.sconce.z != null) {
+          const light = room.sconce.light && typeof room.sconce.light === 'object' ? room.sconce.light : null;
+          torches.push({
+            id: `${room.id}-sconce`,
+            name: `${room.name} Sconce`,
+            x: num(room.sconce.x),
+            y: room.floorY + 1.7,
+            floors: room.floors,
+            z: num(room.sconce.z),
+            nx: num(room.sconce.nx),
+            nz: num(room.sconce.nz),
+            radius: num(light && light.distance, 3.5),
+            room: room.id,
+            wall: 'sconce',
+            vfx: room.sconce.vfx || null,
+            light
+          });
+        }
+        if (room.chest && room.chest.x != null && room.chest.z != null) {
+          chests.push({
+            id: `${room.id}-chest`,
+            name: `${room.name} Chest`,
+            x: num(room.chest.x),
+            y: room.floorY,
+            floors: room.floors,
+            z: num(room.chest.z),
+            room: room.id,
+            gold: room.chest.gold ?? 100,
+            lootTier: room.chest.lootTier || 'standard',
+            state: room.chest.state || 'unopened'
+          });
+        }
+      });
+
+      // Room props (urns, barrels, rubble, ...), cave rocks, and outdoor scenery.
+      // Types are treated as plain labels and only ever shown through textContent.
+      const props = [];
+      rooms.forEach((room) => {
+        (Array.isArray(room.props) ? room.props : []).filter(Boolean).forEach((prop, index) => {
+          const type = String(prop.type || 'prop');
+          props.push({
+            id: `${room.id}-prop-${index}`,
+            name: `${room.name} ${propLabel(type)}`,
+            type,
+            x: num(prop.x),
+            y: room.floorY,
+            floors: room.floors,
+            z: num(prop.z),
+            rotationY: num(prop.rotationY),
+            scale: num(prop.scale, 1),
+            room: room.id
+          });
+        });
+        (Array.isArray(room.rocks) ? room.rocks : []).forEach((point, index) => {
+          props.push({
+            id: `${room.id}-rock-${index}`,
+            name: `${room.name} Rock`,
+            type: 'rock',
+            x: Array.isArray(point) ? num(point[0]) : num(point?.x),
+            y: room.floorY,
+            floors: room.floors,
+            z: Array.isArray(point) ? num(point[1]) : num(point?.z),
+            rotationY: 0,
+            scale: 1,
+            room: room.id
+          });
+        });
+      });
+      const scenery = (Array.isArray(raw.scenery) ? raw.scenery : []).filter(Boolean).map((item, index) => sceneryRecord(item, index, 'scenery'));
+
+      const outdoor = [];
+      const labels = raw.zoneLabels || {};
+      function pushOutdoor(id, name, polygon, role, description) {
+        const footprint = sanitizePolygon(polygon);
+        if (footprint.length < 3) return null;
+        const bounds = boundsFromPolygon(footprint, 0, 0);
+        const area = {
+          id,
+          name,
+          role,
+          description: description || '',
+          polygon: footprint,
+          bounds,
+          kind: 'exterior',
+          x: bounds.x,
+          y: 0,
+          z: bounds.z
+        };
+        outdoor.push(area);
+        return area;
+      }
+      const pendingVistas = [];
+      let exitArea = null;
+      function queueVista(vista, id, name) {
+        if (vista && typeof vista === 'object') pendingVistas.push({ vista, id, name });
+      }
+      pushOutdoor('worn-trail', labels['worn-trail'] || 'Worn Trail', raw.exterior, 'exterior', raw.approach?.description);
+      pushOutdoor('world-hub', labels['world-hub'] || 'Mountain Pass', raw.hub, 'hub', 'The trail leaves the ruins through a gap in the low hills.');
+      pushOutdoor('vestibule-threshold', 'Threshold', raw.vestibule, 'vestibule', '');
+      if (raw.approach?.court) {
+        pushOutdoor('approach-court', 'Approach Court', polygonFromCornerRect(raw.approach.court), 'court', '');
+      }
+      if (raw.approach?.path) {
+        pushOutdoor('approach-path', 'Worn Path', polygonFromCornerRect(raw.approach.path), 'path', raw.approach.description || '');
+      }
+      queueVista(raw.approach && raw.approach.vista, 'entrance-vista', 'Entrance Vista');
+
+      // The exit trail is a second outdoor zone, west of the ruins, built like the entrance.
+      exitArea = raw.exitArea && typeof raw.exitArea === 'object' ? raw.exitArea : null;
+      if (exitArea) {
+        const exitApproach = exitArea.approach && typeof exitArea.approach === 'object' ? exitArea.approach : {};
+        pushOutdoor('exit-trail', labels['exit-trail'] || exitArea.name || 'Exit Trail', exitArea.exterior, 'exterior', String(exitApproach.description || ''));
+        pushOutdoor('exit-pass', labels['exit-pass'] || 'Open Country', exitArea.hub, 'hub', 'The exit trail leaves the ruins through open country.');
+        pushOutdoor('exit-threshold', 'Exit Threshold', exitArea.vestibule, 'vestibule', '');
+        if (exitApproach.court) {
+          pushOutdoor('exit-court', 'Exit Court', polygonFromCornerRect(exitApproach.court), 'court', '');
+        }
+        if (exitApproach.path) {
+          pushOutdoor('exit-path', 'Exit Path', polygonFromCornerRect(exitApproach.path), 'path', String(exitApproach.description || ''));
+        }
+        queueVista(exitApproach.vista, 'exit-vista', 'Exit Vista');
+      }
+
+      // Hub files: the plaza and each spoke are outdoor zones, and the structure keeps its own record.
+      // Names come from the file, so they are only ever shown through textContent.
+      let hub = null;
+      const hubArea = raw.kind === 'hub' && raw.hubArea && typeof raw.hubArea === 'object' ? raw.hubArea : null;
+      if (hubArea) {
+        pushOutdoor('hub', String(labels.hub || 'The Hub'), hubArea.plaza, 'hub-plaza',
+          'Open ground around the respawn point. A path (spoke) leaves it for each connected location.');
+        const spokes = [];
+        (Array.isArray(hubArea.spokes) ? hubArea.spokes : []).filter(Boolean).forEach((spoke, index) => {
+          const name = String(spoke.name || `spoke-${index + 1}`);
+          const area = pushOutdoor(String(spoke.id || `spoke-${index}`), `Spoke: ${name}`, spoke.polygon, 'spoke',
+            `A path from the hub to ${name}. The game connects it with transition ${String(spoke.transitionOut || '')}.`);
+          if (!area) return;
+          Object.assign(area, {
+            type: 'spoke',
+            target: name,
+            width: num(spoke.width),
+            length: num(spoke.length),
+            transitionOut: String(spoke.transitionOut || ''),
+            transitionIn: String(spoke.transitionIn || '')
+          });
+          spokes.push({
+            id: area.id,
+            name,
+            area,
+            end: { x: num(spoke.end?.x), z: num(spoke.end?.z) }
+          });
+          queueVista(spoke.vista, `${area.id}-vista`, `${name} vista`);
+        });
+        let structure = null;
+        const rawStructure = raw.structure && typeof raw.structure === 'object' ? raw.structure : null;
+        const footprint = sanitizePolygon(rawStructure?.polygon);
+        if (footprint.length >= 3) {
+          const height = num(rawStructure.height, 4);
+          const outer = sanitizePolygon(rawStructure.bounds ? polygonFromCornerRect(rawStructure.bounds) : footprint);
+          const own = boundsFromPolygon(footprint, 0, height);
+          structure = {
+            id: 'structure',
+            name: String(rawStructure.label || rawStructure.type || 'Structure'),
+            type: String(rawStructure.type || 'structure'),
+            roof: String(rawStructure.roof || 'none'),
+            material: String(rawStructure.material || 'timber'),
+            enterable: rawStructure.enterable === true,
+            description: String(rawStructure.description || ''),
+            height,
+            polygon: footprint,
+            footprint: own,
+            bounds: boundsFromPolygon(outer.length ? outer : footprint, 0, height),
+            parts: (Array.isArray(rawStructure.parts) ? rawStructure.parts : []).filter(Boolean).map((part) => ({
+              type: String(part.type || 'part'),
+              x: num(part.x),
+              y: num(part.y),
+              z: num(part.z),
+              radius: num(part.radius, 1),
+              height: num(part.height, 1),
+              length: num(part.length, 2),
+              rotationY: num(part.rotationY),
+              prefab: typeof part.prefab === 'string' ? part.prefab : null,
+              vfx: part.vfx && typeof part.vfx === 'object' ? part.vfx : null,
+              light: part.light && typeof part.light === 'object' ? part.light : null
+            })),
+            door: rawStructure.door && typeof rawStructure.door === 'object'
+              ? { x: num(rawStructure.door.x), z: num(rawStructure.door.z), width: num(rawStructure.door.width, 3), height: num(rawStructure.door.height, 2.7) }
+              : null,
+            x: own.x,
+            y: 0,
+            z: own.z
+          };
+        }
+        hub = { radius: num(hubArea.radius), structure, spokes };
+      }
+
+      const decor = Array.isArray(raw.trees) ? raw.trees.filter(Boolean).map((tree, index) => treeRecord(tree, index, 'tree')) : [];
+      if (exitArea) {
+        (Array.isArray(exitArea.trees) ? exitArea.trees : []).forEach((tree) => {
+          if (tree) decor.push(treeRecord(tree, decor.length, 'exit-tree'));
+        });
+        (Array.isArray(exitArea.scenery) ? exitArea.scenery : []).forEach((item) => {
+          if (item) scenery.push(sceneryRecord(item, scenery.length, 'exit-scenery'));
+        });
+      }
+      const distance = [];
+      function addMountains(list, sourceName) {
+        let count = 0;
+        (Array.isArray(list) ? list : []).forEach((mountain) => {
+          if (!mountain || typeof mountain !== 'object') return;
+          const radius = Math.max(1, num(mountain.radius, 20));
+          const height = Math.max(1, num(mountain.height, 40));
+          const x = num(mountain.x);
+          const z = num(mountain.z);
+          count += 1;
+          distance.push({
+            id: `mountain-${distance.length}`,
+            name: `${sourceName} ${count}`,
+            type: 'mountain',
+            x,
+            y: 0,
+            z,
+            height,
+            radius,
+            yaw: num(mountain.yaw),
+            depth: num(mountain.depth, 0.7),
+            bounds: { x, z, y: 0, w: radius * 2, d: radius * 2, h: height }
+          });
+        });
+      }
+      pendingVistas.forEach((item) => {
+        const vista = item.vista;
+        pushOutdoor(item.id, item.name, polygonFromRibbon(vista.path), 'vista', String(vista.description || ''));
+        (Array.isArray(vista.trees) ? vista.trees : []).forEach((tree) => {
+          if (tree) decor.push(treeRecord(tree, decor.length, `${item.id}-tree`));
+        });
+        (Array.isArray(vista.scrub) ? vista.scrub : []).forEach((scrub) => {
+          if (scrub) scenery.push(sceneryRecord({ ...scrub, type: 'scrub' }, scenery.length, `${item.id}-scrub`));
+        });
+        addMountains(vista.mountains, item.name);
+      });
+      if (hubArea && Array.isArray(hubArea.mountains)) addMountains(hubArea.mountains, 'Horizon');
+      let sky = null;
+      const skyPresets = [];
+      if (hubArea && hubArea.environment && typeof hubArea.environment === 'object') skyPresets.push(hubArea.environment);
+      (Array.isArray(raw.transitions) ? raw.transitions : []).forEach((transition) => {
+        if (transition && transition.environmentalPreset && typeof transition.environmentalPreset === 'object') {
+          skyPresets.push(transition.environmentalPreset);
+        }
+      });
+      for (const preset of skyPresets) {
+        if (preset.skyboxVisible !== true) continue;
+        const fog = preset.fog && typeof preset.fog === 'object' ? preset.fog : {};
+        sky = {
+          visible: true,
+          color: typeof preset.clearColor === 'string' ? preset.clearColor : '#c5d0d6',
+          fog: typeof fog.color === 'string' ? fog.color : '#c5d0d6'
+        };
+        break;
+      }
+
+      let playerStart = null;
+      if (raw.start && raw.start.x != null && raw.start.z != null) {
+        playerStart = {
+          id: 'player-start',
+          name: labels['worn-trail'] || 'Player Start',
+          x: num(raw.start.x),
+          y: num(raw.start.y),
+          z: num(raw.start.z),
+          facingYaw: num(raw.start.yaw ?? raw.start.facingYaw),
+          locationName: labels['worn-trail'] || 'Starting Area'
+        };
+      }
+      // A hub's start point is also where the player respawns after a death.
+      if (hubArea && hubArea.respawn && typeof hubArea.respawn === 'object') {
+        playerStart = {
+          id: 'player-start',
+          name: 'Respawn',
+          x: num(hubArea.respawn.x),
+          y: num(hubArea.respawn.y),
+          z: num(hubArea.respawn.z),
+          facingYaw: num(hubArea.respawn.yaw),
+          locationName: 'Spawn and respawn point',
+          respawn: true
+        };
+      }
+
+      const transitions = (Array.isArray(raw.transitions) ? raw.transitions : []).filter(Boolean).map((transition, index) => {
+        const volume = transition.volume;
+        const transitionY = num(transition.y);
+        const transitionFloor = Number.isInteger(transition.floor) ? transition.floor : floorOfY(transitionY);
+        let box;
+        const spawn = transition.targetSpawnPoint;
+        if (volume === null && spawn && typeof spawn === 'object') {
+          // An arrival: the trigger lives in another zone, so only the landing point is drawn here.
+          return {
+            ...transition,
+            id: transition.id || `trans_${index}`,
+            name: transition.name || transition.id || 'Zone Transition',
+            triggerBox: null,
+            arrival: { x: num(spawn.x), z: num(spawn.z), yaw: num(spawn.rotationY) },
+            x: num(spawn.x),
+            y: transitionY,
+            z: num(spawn.z),
+            floors: [transitionFloor]
+          };
+        }
+        if (volume && volume.minX != null && volume.maxX != null && volume.minZ != null && volume.maxZ != null) {
+          const minX = num(volume.minX);
+          const maxX = num(volume.maxX);
+          const minZ = num(volume.minZ);
+          const maxZ = num(volume.maxZ);
+          box = {
+            x: (minX + maxX) / 2,
+            z: (minZ + maxZ) / 2,
+            y: transitionY,
+            w: Math.max(0.4, Math.abs(maxX - minX)),
+            d: Math.max(0.4, Math.abs(maxZ - minZ)),
+            h: 3
+          };
+        } else {
+          box = extractBounds(transition);
+          box = { ...box, y: Number.isFinite(Number(box.y)) ? Number(box.y) : transitionY };
+        }
+        return {
+          ...transition,
+          id: transition.id || `trans_${index}`,
+          name: transition.name || transition.id || 'Zone Transition',
+          triggerBox: box,
+          x: box.x,
+          y: num(box.y),
+          z: box.z,
+          floors: [transitionFloor]
+        };
+      });
+
+      return {
+        name: raw.name || raw.areaName || raw.title || 'The Ancient Ruins',
+        author: raw.author || 'Extracted Game Map',
+        version: raw.version || '1.0',
+        layout: 'harper',
+        enemyName,
+        rooms,
+        doors,
+        torches,
+        chests,
+        enemies,
+        transitions,
+        trail: null,
+        decor,
+        props,
+        scenery,
+        options: raw.options && typeof raw.options === 'object' ? raw.options : null,
+        playerStart,
+        outdoor,
+        hub,
+        distance,
+        sky
+      };
+    }
+
+    // Shared by the plan and 3D views: colour and size for each prop or scenery type.
+    const PROP_STYLES = new Map([
+      ['urn', { shape: 'cyl', w: 0.55, h: 0.85, color: '#a8a29e' }],
+      ['casket', { shape: 'box', w: 0.9, h: 0.55, d: 2.0, color: '#d6d3d1' }],
+      ['broken-pillar', { shape: 'cyl', w: 0.9, h: 1.8, color: '#94a3b8' }],
+      ['rubble', { shape: 'rock', w: 0.9, h: 0.5, color: '#78716c' }],
+      ['barrel', { shape: 'cyl', w: 0.8, h: 1.0, color: '#b45309' }],
+      ['crate', { shape: 'box', w: 0.9, h: 0.9, d: 0.9, color: '#ca8a04' }],
+      ['shelf', { shape: 'box', w: 1.8, h: 1.8, d: 0.5, color: '#92400e' }],
+      ['plank-pile', { shape: 'box', w: 1.3, h: 0.3, d: 0.8, color: '#a16207' }],
+      ['stalagmite', { shape: 'cone', w: 0.8, h: 1.8, color: '#64748b' }],
+      ['bone-pile', { shape: 'rock', w: 0.8, h: 0.35, color: '#e7e5e4' }],
+      ['rock', { shape: 'rock', w: 1.1, h: 0.8, color: '#6b7280' }],
+      ['boulder', { shape: 'rock', w: 1.6, h: 1.2, color: '#6b7280' }],
+      ['scrub', { shape: 'cone', w: 0.8, h: 0.7, color: '#65a30d' }],
+      ['standing-stone', { shape: 'box', w: 0.7, h: 2.4, d: 0.5, color: '#9ca3af' }],
+      ['gravestone', { shape: 'box', w: 0.6, h: 1.0, d: 0.2, color: '#a3a3a3' }],
+      ['fallen-column', { shape: 'box', w: 0.9, h: 0.9, d: 3.2, color: '#94a3b8' }],
+      ['broken-statue', { shape: 'cyl', w: 0.9, h: 1.6, color: '#a8a29e' }],
+      ['cart-wreck', { shape: 'box', w: 1.6, h: 0.8, d: 2.4, color: '#78350f' }],
+      ['campfire-ashes', { shape: 'cyl', w: 1.0, h: 0.1, color: '#44403c' }],
+      ['supply-crate', { shape: 'box', w: 0.8, h: 0.8, d: 0.8, color: '#ca8a04' }],
+      ['signpost', { shape: 'box', w: 0.15, h: 2.0, d: 0.6, color: '#92400e' }]
+    ]);
+    const DEFAULT_PROP_STYLE = { shape: 'rock', w: 0.8, h: 0.6, color: '#a3a3a3' };
+
+    function propStyle(type) {
+      return PROP_STYLES.get(type) || DEFAULT_PROP_STYLE;
+    }
+
+    function propLabel(type) {
+      return String(type).replace(/[-_]+/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase());
+    }
+
+    function extractCoord(obj) {
+      if (!obj || typeof obj !== 'object') return { x: 0, y: 0, z: 0 };
+      const x = obj.x ?? obj.posX ?? obj.cx ?? (Array.isArray(obj.position) ? obj.position[0] : (Array.isArray(obj.pos) ? obj.pos[0] : 0));
+      const y = obj.y ?? obj.posY ?? obj.cy ?? (Array.isArray(obj.position) ? obj.position[1] : (Array.isArray(obj.pos) ? obj.pos[1] : 0));
+      const z = obj.z ?? obj.posZ ?? obj.cz ?? (Array.isArray(obj.position) ? obj.position[2] : (Array.isArray(obj.pos) ? obj.pos[2] : 0));
+      return {
+        x: Number.isFinite(Number(x)) ? Number(x) : 0,
+        y: Number.isFinite(Number(y)) ? Number(y) : 0,
+        z: Number.isFinite(Number(z)) ? Number(z) : 0
+      };
+    }
+
+    function extractBounds(item) {
+      if (!item) return { x: 0, z: 0, w: 6, d: 6, h: 4 };
+
+      // Case 1: item.bounds or item.box or item.triggerBox or item.rect
+      const b = item.bounds || item.triggerBox || item.box || item.trigger || item.rect || item;
+
+      // Check min/max formats: min: [x, z], max: [x, z] or minX, maxX, etc.
+      if (b.minX !== undefined && b.maxX !== undefined) {
+        const w = Math.abs(b.maxX - b.minX) || 4;
+        const d = Math.abs((b.maxZ ?? b.maxY ?? 0) - (b.minZ ?? b.minY ?? 0)) || 4;
+        return {
+          x: (b.minX + b.maxX) / 2,
+          z: ((b.minZ ?? b.minY ?? 0) + (b.maxZ ?? b.maxY ?? 0)) / 2,
+          w: w,
+          d: d,
+          h: b.h ?? b.height ?? 4
+        };
+      }
+
+      // Check width/depth vs w/d
+      const w = b.w ?? b.width ?? b.dx ?? b.sizeX ?? (Array.isArray(b.size) ? b.size[0] : 6);
+      const d = b.d ?? b.depth ?? b.dz ?? b.length ?? b.sizeZ ?? (Array.isArray(b.size) ? b.size[2] ?? b.size[1] : 6);
+      const h = b.h ?? b.height ?? b.dy ?? b.sizeY ?? (Array.isArray(b.size) ? b.size[1] : 4);
+
+      // Check center coordinates
+      const coords = extractCoord(b.pos || b.position || b.center || b);
+
+      return {
+        x: coords.x,
+        z: coords.z,
+        y: coords.y,
+        w: Math.max(1, Number(w) || 6),
+        d: Math.max(1, Number(d) || 6),
+        h: Math.max(1, Number(h) || 4)
+      };
+    }
+
+    function normalizeDungeonData(raw) {
+      if (!raw || typeof raw !== 'object') {
+        throw new Error("Input must be a valid JSON object");
+      }
+      if (isHarperLayout(raw)) return normalizeHarperLayout(raw);
+
+      const normalized = {
+        name: raw.name || raw.areaName || raw.title || "The Ancient Ruins",
+        author: raw.author || "Extracted Game Map",
+        version: raw.version || "1.0",
+        rooms: [],
+        doors: [],
+        torches: [],
+        chests: [],
+        enemies: [],
+        transitions: [],
+        trail: null,
+        decor: [],
+        playerStart: null,
+        outdoor: [],
+        layout: 'sample'
+      };
+
+      // 1. Normalize Rooms / Chambers
+      const rawRooms = raw.rooms || raw.chambers || raw.zones || raw.cells || [];
+      if (Array.isArray(rawRooms)) {
+        normalized.rooms = rawRooms.filter(r => r != null).map((r, i) => {
+          const b = extractBounds(r);
+          const kind = r.kind || r.tier || 'chamber';
+          return {
+            ...r,
+            id: r.id || `room_${i}`,
+            name: r.name || r.id || `Chamber ${i + 1}`,
+            kind,
+            tier: r.tier || (b.y < -2 ? 'lower' : 'upper'),
+            floorY: r.floorY ?? r.y ?? b.y ?? 0,
+            bounds: b,
+            polygon: polygonFromCenterBounds(b)
+          };
+        });
+      }
+
+      // 2. Normalize Doors & Gates
+      const rawDoors = raw.doors || raw.portals || raw.doorways || [];
+      if (Array.isArray(rawDoors)) {
+        normalized.doors = rawDoors.filter(d => d != null).map((d, i) => {
+          const c = extractCoord(d);
+          const width = Number(d.w ?? d.width ?? 3) || 3;
+          return {
+            ...d,
+            id: d.id || `door_${i}`,
+            x: c.x,
+            y: c.y,
+            z: c.z,
+            w: width,
+            height: Number(d.h ?? d.height ?? 3.2) || 3.2,
+            a: [c.x - width / 2, c.z],
+            b: [c.x + width / 2, c.z],
+            state: d.state || 'open',
+            type: d.type || (d.id && d.id.includes('boss') ? 'boss_gate' : 'doorway')
+          };
+        });
+      }
+
+      // 3. Normalize Torches & Sconces
+      const rawTorches = raw.torches || raw.sconces || raw.lights || [];
+      if (Array.isArray(rawTorches)) {
+        normalized.torches = rawTorches.filter(t => t != null).map((t, i) => {
+          const c = extractCoord(t);
+          return {
+            ...t,
+            id: t.id || `torch_${i}`,
+            x: c.x,
+            y: c.y,
+            z: c.z,
+            radius: Number(t.radius ?? t.range ?? 4.5) || 4.5
+          };
+        });
+      }
+
+      // 4. Normalize Chests
+      const rawChests = raw.chests || raw.containers || raw.loot || [];
+      if (Array.isArray(rawChests)) {
+        normalized.chests = rawChests.filter(c => c != null).map((c, i) => {
+          const pt = extractCoord(c);
+          return {
+            ...c,
+            id: c.id || `chest_${i}`,
+            name: c.name || "Treasure Chest",
+            x: pt.x,
+            y: pt.y,
+            z: pt.z,
+            gold: c.gold ?? 50,
+            lootTier: c.lootTier || (c.id && c.id.includes('boss') ? 'boss_master' : 'standard')
+          };
+        });
+      }
+
+      // 5. Normalize Enemies & Boss
+      const rawEnemies = raw.enemies || raw.skeletons || raw.actors || raw.spawns || [];
+      if (Array.isArray(rawEnemies)) {
+        normalized.enemies = rawEnemies.filter(e => e != null).map((e, i) => {
+          const pt = extractCoord(e);
+          const isBoss = Boolean(e.isBoss || (e.name && e.name.toLowerCase().includes('king')) || (e.id && e.id.toLowerCase().includes('king')));
+          return {
+            ...e,
+            id: e.id || `enemy_${i}`,
+            name: e.name || (isBoss ? "Skeleton King" : "Skeletal Warrior"),
+            x: pt.x,
+            y: pt.y,
+            z: pt.z,
+            hp: e.hp ?? (isBoss ? 420 : 50),
+            isBoss: isBoss,
+            type: e.type || (isBoss ? 'boss_skeleton_king' : 'skeleton_warrior')
+          };
+        });
+      }
+
+      // 6. Normalize Transitions
+      const rawTrans = raw.transitions || raw.triggers || [];
+      if (Array.isArray(rawTrans)) {
+        normalized.transitions = rawTrans.filter(t => t != null).map((t, i) => {
+          const b = extractBounds(t);
+          return {
+            ...t,
+            id: t.id || `trans_${i}`,
+            name: t.name || "Zone Transition",
+            triggerBox: b
+          };
+        });
+      }
+
+      // 7. Normalize Trail
+      if (raw.trail && typeof raw.trail === 'object') {
+        const rawPts = Array.isArray(raw.trail.points) ? raw.trail.points : (Array.isArray(raw.trail) ? raw.trail : []);
+        const safePts = rawPts.map(p => {
+          if (Array.isArray(p)) return { x: Number(p[0]) || 0, z: Number(p[1] ?? p[2]) || 0 };
+          return { x: Number(p?.x) || 0, z: Number(p?.z ?? p?.y) || 0 };
+        });
+        normalized.trail = {
+          width: Number(raw.trail.width) || 4.5,
+          points: safePts
+        };
+      }
+
+      // 8. Normalize Player Start
+      const pStart = raw.playerStart || raw.startPoint || raw.spawn;
+      if (pStart) {
+        const pt = extractCoord(pStart);
+        normalized.playerStart = {
+          x: pt.x,
+          y: pt.y,
+          z: pt.z,
+          facingYaw: Number(pStart.facingYaw ?? pStart.yaw ?? pStart.rotY) || 0,
+          locationName: pStart.locationName || "Starting Area"
+        };
+      }
+
+      // 9. Normalize Decor
+      if (Array.isArray(raw.decor)) {
+        normalized.decor = raw.decor.map(d => {
+          const pt = extractCoord(d);
+          return { ...d, x: pt.x, y: pt.y, z: pt.z };
+        });
+      }
+
+      return normalized;
+    }
+
+    // Layer checkboxes
+    const layerRooms = document.getElementById('layerRooms');
+    const layerTrail = document.getElementById('layerTrail');
+    const layerHorizon = document.getElementById('layerHorizon');
+    const layerDoors = document.getElementById('layerDoors');
+    const layerTorches = document.getElementById('layerTorches');
+    const layerChests = document.getElementById('layerChests');
+    const layerEnemies = document.getElementById('layerEnemies');
+    const layerSpawns = document.getElementById('layerSpawns');
+    const layerProps = document.getElementById('layerProps');
+    const layerGrid = document.getElementById('layerGrid');
+
+    // UI elements
+    const zoomLevelDisplay = document.getElementById('zoomLevelDisplay');
+    const mapHeaderSubtitle = document.getElementById('mapHeaderSubtitle');
+    const cursorCoordX = document.getElementById('cursorCoordX');
+    const cursorCoordZ = document.getElementById('cursorCoordZ');
+    const statRooms = document.getElementById('statRooms');
+    const statEnemies = document.getElementById('statEnemies');
+    const statChests = document.getElementById('statChests');
+    const statTorches = document.getElementById('statTorches');
+    const statProps = document.getElementById('statProps');
+    const floorSelector = document.getElementById('floorSelector');
+    const landmarkPanel = document.getElementById('landmarkPanel');
+    const btnGoEntrance = document.getElementById('btnGoEntrance');
+    const btnGoExit = document.getElementById('btnGoExit');
+    const btnGoExitTrail = document.getElementById('btnGoExitTrail');
+    const btnGoRespawn = document.getElementById('btnGoRespawn');
+    const spokeButtons = document.getElementById('spokeButtons');
+
+    // Inspector elements
+    const inspectorEmptyState = document.getElementById('inspectorEmptyState');
+    const inspectorContent = document.getElementById('inspectorContent');
+    const inspectorCategory = document.getElementById('inspectorCategory');
+    const inspTitle = document.getElementById('inspTitle');
+    const inspSubtitle = document.getElementById('inspSubtitle');
+    const inspPosX = document.getElementById('inspPosX');
+    const inspPosY = document.getElementById('inspPosY');
+    const inspPosZ = document.getElementById('inspPosZ');
+    const inspWidth = document.getElementById('inspWidth');
+    const inspHeight = document.getElementById('inspHeight');
+    const inspDepth = document.getElementById('inspDepth');
+    const inspDimensionsRow = document.getElementById('inspDimensionsRow');
+    const inspAttributes = document.getElementById('inspAttributes');
+    const inspRawJson = document.getElementById('inspRawJson');
+    const inspFloorTag = document.getElementById('inspFloorTag');
+    const btnFocusSelected = document.getElementById('btnFocusSelected');
+    const btnCopyEntityJson = document.getElementById('btnCopyEntityJson');
+
+    // Modal elements
+    const jsonModal = document.getElementById('jsonModal');
+    const jsonEditorArea = document.getElementById('jsonEditorArea');
+    const btnOpenPasteModal = document.getElementById('btnOpenPasteModal');
+    const btnCloseModal = document.getElementById('btnCloseModal');
+    const btnCancelModal = document.getElementById('btnCancelModal');
+    const btnApplyJson = document.getElementById('btnApplyJson');
+    const btnFormatJson = document.getElementById('btnFormatJson');
+    const btnLoadExampleInModal = document.getElementById('btnLoadExampleInModal');
+    const jsonErrorBanner = document.getElementById('jsonErrorBanner');
+    const fileUploadInput = document.getElementById('fileUploadInput');
+    const btnSample = document.getElementById('btnSample');
+
+    // Search elements
+    const searchInput = document.getElementById('searchInput');
+    const searchResults = document.getElementById('searchResults');
+    const clearSearchBtn = document.getElementById('clearSearchBtn');
+
+    // Coordinate conversions
+    function worldToScreen(wx, wz) {
+      return {
+        x: canvas.width / 2 + (wx - view.x) * view.scale,
+        y: canvas.height / 2 + (wz - view.y) * view.scale
+      };
+    }
+
+    function screenToWorld(sx, sy) {
+      return {
+        x: (sx - canvas.width / 2) / view.scale + view.x,
+        z: (sy - canvas.height / 2) / view.scale + view.y
+      };
+    }
+
+    function resizeCanvas() {
+      const rect = container.getBoundingClientRect();
+      if (canvas.width !== rect.width || canvas.height !== rect.height) {
+        canvas.width = rect.width;
+        canvas.height = rect.height;
+        render();
+      }
+      if (viewMode === '3d' && view3d) view3d.resize();
+    }
+
+    // --------------------------------------------------------------------------
+    // Main Render Pipeline
+    // --------------------------------------------------------------------------
+    function render() {
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+      if (!dungeonData) return;
+
+      if (layerGrid.checked) drawGrid();
+      if (layerHorizon.checked) drawDistance();
+      if (layerTrail.checked) {
+        drawOutdoor();
+        if (dungeonData.trail) drawTrail();
+        if (dungeonData.decor) drawOutdoorDecor();
+      }
+      if (layerRooms.checked && dungeonData.rooms) drawRooms();
+      if (layerRooms.checked && dungeonData.hub?.structure) drawHubStructure();
+      if (layerDoors.checked && dungeonData.doors) drawDoors();
+      if (layerSpawns.checked && dungeonData.transitions) drawTransitions();
+      if (layerTorches.checked && dungeonData.torches) drawTorches();
+      if (layerChests.checked && dungeonData.chests) drawChests();
+      if (layerProps.checked) drawProps();
+      if (layerEnemies.checked && dungeonData.enemies) drawEnemies();
+      if (layerSpawns.checked && dungeonData.playerStart) drawPlayerSpawn();
+
+      if (selectedEntity) drawEntityHighlight(selectedEntity, '#f59e0b', true);
+      if (hoveredEntity && hoveredEntity !== selectedEntity) drawEntityHighlight(hoveredEntity, '#38bdf8', false);
+
+      zoomLevelDisplay.textContent = Math.round((view.scale / 12.0) * 100) + '%';
+    }
+
+    function drawGrid() {
+      const pTopLeft = screenToWorld(0, 0);
+      const pBottomRight = screenToWorld(canvas.width, canvas.height);
+
+      const minX = Math.floor(pTopLeft.x);
+      const maxX = Math.ceil(pBottomRight.x);
+      const minZ = Math.floor(pTopLeft.z);
+      const maxZ = Math.ceil(pBottomRight.z);
+
+      let step = 1;
+      if (view.scale < 6) step = 10;
+      else if (view.scale < 15) step = 5;
+      else if (view.scale > 35) step = 0.5;
+
+      ctx.save();
+      ctx.lineWidth = 1;
+
+      for (let x = Math.floor(minX / step) * step; x <= maxX; x += step) {
+        const sx = worldToScreen(x, 0).x;
+        ctx.beginPath();
+        if (Math.abs(x) < 0.001) {
+          ctx.strokeStyle = 'rgba(234, 179, 8, 0.45)';
+          ctx.lineWidth = 1.5;
+        } else if (Math.abs(x % (step * 5)) < 0.001) {
+          ctx.strokeStyle = 'rgba(71, 85, 105, 0.4)';
+          ctx.lineWidth = 1;
+        } else {
+          ctx.strokeStyle = 'rgba(30, 41, 59, 0.6)';
+          ctx.lineWidth = 0.5;
+        }
+        ctx.moveTo(sx, 0);
+        ctx.lineTo(sx, canvas.height);
+        ctx.stroke();
+
+        if (view.scale > 10 && Math.abs(x % (step * 2)) < 0.001) {
+          ctx.fillStyle = 'rgba(100, 116, 139, 0.6)';
+          ctx.font = '9px "JetBrains Mono", monospace';
+          ctx.fillText(`${x}m`, sx + 4, 14);
+        }
+      }
+
+      for (let z = Math.floor(minZ / step) * step; z <= maxZ; z += step) {
+        const sy = worldToScreen(0, z).y;
+        ctx.beginPath();
+        if (Math.abs(z) < 0.001) {
+          ctx.strokeStyle = 'rgba(234, 179, 8, 0.45)';
+          ctx.lineWidth = 1.5;
+        } else if (Math.abs(z % (step * 5)) < 0.001) {
+          ctx.strokeStyle = 'rgba(71, 85, 105, 0.4)';
+          ctx.lineWidth = 1;
+        } else {
+          ctx.strokeStyle = 'rgba(30, 41, 59, 0.6)';
+          ctx.lineWidth = 0.5;
+        }
+        ctx.moveTo(0, sy);
+        ctx.lineTo(canvas.width, sy);
+        ctx.stroke();
+
+        if (view.scale > 10 && Math.abs(z % (step * 2)) < 0.001) {
+          ctx.fillStyle = 'rgba(100, 116, 139, 0.6)';
+          ctx.font = '9px "JetBrains Mono", monospace';
+          ctx.fillText(`${z}m`, 6, sy - 4);
+        }
+      }
+
+      ctx.restore();
+    }
+
+    function drawTrail() {
+      const pts = dungeonData.trail?.points;
+      if (!pts || pts.length < 2) return;
+
+      ctx.save();
+      const trailWidthPx = (dungeonData.trail.width || 4.5) * view.scale;
+
+      ctx.beginPath();
+      const s0 = worldToScreen(pts[0].x, pts[0].z);
+      ctx.moveTo(s0.x, s0.y);
+      for (let i = 1; i < pts.length; i++) {
+        const sp = worldToScreen(pts[i].x, pts[i].z);
+        ctx.lineTo(sp.x, sp.y);
+      }
+
+      ctx.strokeStyle = '#3d2e1e';
+      ctx.lineWidth = trailWidthPx;
+      ctx.lineCap = 'round';
+      ctx.lineJoin = 'round';
+      ctx.stroke();
+
+      ctx.strokeStyle = '#5a452d';
+      ctx.lineWidth = trailWidthPx * 0.6;
+      ctx.stroke();
+
+      ctx.beginPath();
+      ctx.setLineDash([8, 8]);
+      ctx.strokeStyle = 'rgba(217, 119, 6, 0.4)';
+      ctx.lineWidth = 2;
+      ctx.moveTo(s0.x, s0.y);
+      for (let i = 1; i < pts.length; i++) {
+        const sp = worldToScreen(pts[i].x, pts[i].z);
+        ctx.lineTo(sp.x, sp.y);
+      }
+      ctx.stroke();
+      ctx.restore();
+    }
+
+    function tracePolygon(polygon) {
+      const origin = worldToScreen(polygon[0][0], polygon[0][1]);
+      ctx.beginPath();
+      ctx.moveTo(origin.x, origin.y);
+      for (let i = 1; i < polygon.length; i++) {
+        const point = worldToScreen(polygon[i][0], polygon[i][1]);
+        ctx.lineTo(point.x, point.y);
+      }
+      ctx.closePath();
+    }
+
+    function paintPolygon(polygon, fill, stroke, lineWidth) {
+      if (!polygon || polygon.length < 3) return;
+      tracePolygon(polygon);
+      ctx.fillStyle = fill;
+      ctx.fill();
+      if (stroke) {
+        ctx.strokeStyle = stroke;
+        ctx.lineWidth = lineWidth || 2;
+        ctx.stroke();
+      }
+    }
+
+    function drawOutdoor() {
+      const areas = dungeonData.outdoor;
+      if (!Array.isArray(areas)) return;
+      ctx.save();
+      areas.forEach((area) => {
+        if (!area?.polygon) return;
+        let fill = 'rgba(48, 40, 30, 0.72)';
+        let stroke = 'rgba(120, 96, 62, 0.55)';
+        if (area.role === 'path' || area.role === 'court') {
+          fill = 'rgba(92, 70, 42, 0.88)';
+          stroke = 'rgba(196, 146, 74, 0.45)';
+        } else if (area.role === 'spoke') {
+          fill = 'rgba(112, 84, 50, 0.92)';
+          stroke = 'rgba(224, 170, 90, 0.6)';
+        } else if (area.role === 'hub-plaza') {
+          fill = 'rgba(84, 74, 54, 0.78)';
+          stroke = 'rgba(176, 150, 100, 0.5)';
+        } else if (area.role === 'hub') {
+          fill = 'rgba(62, 72, 52, 0.55)';
+          stroke = 'rgba(140, 156, 110, 0.45)';
+        } else if (area.role === 'vista') {
+          fill = 'rgba(92, 74, 48, 0.62)';
+          stroke = 'rgba(186, 148, 86, 0.4)';
+        } else if (area.role === 'vestibule') {
+          fill = 'rgba(86, 74, 56, 0.8)';
+          stroke = 'rgba(214, 188, 140, 0.55)';
+        }
+        paintPolygon(area.polygon, fill, stroke, 1.5);
+        const namedTrail = area.id === 'exit-trail' || area.id === 'exit-pass';
+        if (view.scale > 6 && (area.role !== 'exterior' || namedTrail)) {
+          const center = worldToScreen(area.x, area.z);
+          ctx.fillStyle = 'rgba(253, 230, 138, 0.8)';
+          ctx.font = '10px Inter, sans-serif';
+          ctx.textAlign = 'center';
+          ctx.fillText(area.name || area.id, center.x, center.y);
+        }
+      });
+      ctx.restore();
+    }
+
+    function drawDistance() {
+      const mountains = dungeonData.distance;
+      if (!Array.isArray(mountains)) return;
+      ctx.save();
+      mountains.forEach((mountain) => {
+        if (!mountain) return;
+        const s = worldToScreen(mountain.x, mountain.z);
+        const radius = Math.max(3, num(mountain.radius, 20) * view.scale);
+        ctx.beginPath();
+        ctx.arc(s.x, s.y, radius, 0, Math.PI * 2);
+        ctx.fillStyle = 'rgba(148, 163, 184, 0.16)';
+        ctx.fill();
+        ctx.strokeStyle = 'rgba(203, 213, 225, 0.4)';
+        ctx.lineWidth = 1;
+        ctx.stroke();
+        ctx.beginPath();
+        ctx.moveTo(s.x, s.y - radius * 0.85);
+        ctx.lineTo(s.x + radius * 0.55, s.y + radius * 0.15);
+        ctx.lineTo(s.x - radius * 0.55, s.y + radius * 0.15);
+        ctx.closePath();
+        ctx.fillStyle = 'rgba(203, 213, 225, 0.28)';
+        ctx.fill();
+      });
+      ctx.restore();
+    }
+
+    function drawOutdoorDecor() {
+      ctx.save();
+      dungeonData.decor.forEach(item => {
+        if (!item) return;
+        if (item.type === 'dead_tree') {
+          const s = worldToScreen(item.x, item.z);
+          const mark = 3 + Math.min(4, num(item.scale, 1) * 1.5);
+          ctx.fillStyle = '#451a03';
+          ctx.beginPath();
+          ctx.arc(s.x, s.y, mark, 0, Math.PI * 2);
+          ctx.fill();
+
+          ctx.strokeStyle = '#78350f';
+          ctx.lineWidth = 2;
+          ctx.beginPath();
+          ctx.moveTo(s.x - 7, s.y - 7);
+          ctx.lineTo(s.x + 7, s.y + 7);
+          ctx.moveTo(s.x + 7, s.y - 7);
+          ctx.lineTo(s.x - 7, s.y + 7);
+          ctx.stroke();
+        }
+      });
+      ctx.restore();
+    }
+
+    function drawProps() {
+      ctx.save();
+      [dungeonData.props, dungeonData.scenery].forEach((list) => {
+        if (!Array.isArray(list)) return;
+        list.forEach((item) => {
+          if (!item) return;
+          const style = propStyle(item.type);
+          const scale = num(item.scale, 1);
+          const s = worldToScreen(item.x, item.z);
+          const w = Math.max(3, style.w * scale * view.scale);
+          const d = Math.max(3, (style.d ?? style.w) * scale * view.scale);
+          ctx.save();
+          ctx.translate(s.x, s.y);
+          ctx.rotate(-num(item.rotationY));
+          ctx.fillStyle = style.color;
+          ctx.strokeStyle = 'rgba(0, 0, 0, 0.6)';
+          ctx.lineWidth = 1;
+          if (style.shape === 'cyl' || style.shape === 'cone' || style.shape === 'rock') {
+            ctx.beginPath();
+            ctx.ellipse(0, 0, w / 2, d / 2, 0, 0, Math.PI * 2);
+            ctx.fill();
+            ctx.stroke();
+          } else {
+            ctx.fillRect(-w / 2, -d / 2, w, d);
+            ctx.strokeRect(-w / 2, -d / 2, w, d);
+          }
+          ctx.restore();
+        });
+      });
+      ctx.restore();
+    }
+
+    function drawMarkerBadge(marker, x, y) {
+      const style = MARKER_STYLES[marker];
+      ctx.save();
+      ctx.font = 'bold 11px Inter, sans-serif';
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      const width = ctx.measureText(style.label).width + 16;
+      const height = 18;
+      ctx.beginPath();
+      if (ctx.roundRect) ctx.roundRect(x - width / 2, y - height / 2, width, height, 9);
+      else ctx.rect(x - width / 2, y - height / 2, width, height);
+      ctx.fillStyle = style.stroke;
+      ctx.fill();
+      ctx.fillStyle = '#0a0c10';
+      ctx.fillText(style.label, x, y + 0.5);
+      ctx.restore();
+    }
+
+    function drawRooms() {
+      ctx.save();
+      const badges = [];
+      dungeonData.rooms.forEach(room => {
+        if (!room) return;
+        const polygon = room.polygon;
+        const b = room.bounds || extractBounds(room);
+        const bw = b.w ?? 6;
+        const bd = b.d ?? 6;
+        const floorY = room.floorY ?? b.y ?? 0;
+        const kind = room.kind || room.tier;
+
+        let roomBg = '#161e2e';
+        let borderColor = '#3b82f6';
+
+        if (room.tier === 'boss_arena' || kind === 'boss_arena') {
+          roomBg = '#271017';
+          borderColor = '#ef4444';
+        } else if (kind === 'corridor') {
+          roomBg = '#101722';
+          borderColor = '#64748b';
+        } else if (floorY < -2.0) {
+          roomBg = '#131822';
+          borderColor = '#475569';
+        } else if (room.tier === 'stairwell' || kind === 'stairwell') {
+          roomBg = '#1c1f2b';
+          borderColor = '#8b5cf6';
+        }
+
+        const marker = roomMarker(room);
+        if (marker) {
+          roomBg = MARKER_STYLES[marker].fill;
+          borderColor = MARKER_STYLES[marker].stroke;
+        }
+
+        if (polygon && polygon.length >= 3) {
+          tracePolygon(polygon);
+          ctx.fillStyle = roomBg;
+          ctx.fill();
+
+          if (view.scale > 8) {
+            ctx.save();
+            tracePolygon(polygon);
+            ctx.clip();
+            ctx.strokeStyle = 'rgba(255, 255, 255, 0.04)';
+            ctx.lineWidth = 1;
+            const topLeft = worldToScreen(b.minX ?? (b.x - bw / 2), b.minZ ?? (b.z - bd / 2));
+            const bottomRight = worldToScreen(b.maxX ?? (b.x + bw / 2), b.maxZ ?? (b.z + bd / 2));
+            const left = Math.min(topLeft.x, bottomRight.x);
+            const right = Math.max(topLeft.x, bottomRight.x);
+            const top = Math.min(topLeft.y, bottomRight.y);
+            const bottom = Math.max(topLeft.y, bottomRight.y);
+            for (let x = left + view.scale; x < right; x += view.scale) {
+              ctx.beginPath();
+              ctx.moveTo(x, top);
+              ctx.lineTo(x, bottom);
+              ctx.stroke();
+            }
+            for (let y = top + view.scale; y < bottom; y += view.scale) {
+              ctx.beginPath();
+              ctx.moveTo(left, y);
+              ctx.lineTo(right, y);
+              ctx.stroke();
+            }
+            if (room.tier === 'stairwell' || kind === 'stairwell') {
+              ctx.strokeStyle = 'rgba(167, 139, 250, 0.35)';
+              ctx.lineWidth = 1.5;
+              const steps = 8;
+              for (let i = 1; i < steps; i++) {
+                const stepY = top + ((bottom - top) * i) / steps;
+                ctx.beginPath();
+                ctx.moveTo(left, stepY);
+                ctx.lineTo(right, stepY);
+                ctx.stroke();
+              }
+            }
+            ctx.restore();
+          }
+
+          tracePolygon(polygon);
+          ctx.strokeStyle = borderColor;
+          ctx.lineWidth = marker ? 5 : 2.5;
+          ctx.stroke();
+        }
+
+        const labelZoom = kind === 'corridor' ? 14 : 7;
+        if (marker) {
+          // The badge stays visible at every zoom so the entrance and exit can be found.
+          const center = worldToScreen(b.x ?? 0, b.z ?? 0);
+          badges.push({ marker, x: center.x, y: view.scale > labelZoom ? center.y - 24 : center.y });
+        }
+        if (view.scale > labelZoom) {
+          const center = worldToScreen(b.x ?? 0, b.z ?? 0);
+          ctx.fillStyle = '#f8fafc';
+          ctx.font = 'bold 11px Inter, sans-serif';
+          ctx.textAlign = 'center';
+          ctx.fillText(room.name || room.id || 'Room', center.x, center.y - 4);
+          ctx.fillStyle = '#94a3b8';
+          ctx.font = '9px "JetBrains Mono", monospace';
+          ctx.fillText(`Y: ${Number(floorY).toFixed(1)}m | ${bw.toFixed(1)}x${bd.toFixed(1)}m`, center.x, center.y + 10);
+        }
+      });
+      badges.forEach((badge) => drawMarkerBadge(badge.marker, badge.x, badge.y));
+      ctx.restore();
+    }
+
+    // Wall and roof colours for each hub structure material (plan and 3D).
+    const STRUCTURE_STYLES = {
+      timber: { wall: '#8a6a46', roof: '#c9a45c', hex: 0x8a6a46, roofHex: 0xb8924f, floorHex: 0x6b5a45 },
+      canvas: { wall: '#d9cdb4', roof: '#efe6d0', hex: 0xd9cdb4, roofHex: 0xe6dcc3, floorHex: 0x7a6e58 },
+      stone: { wall: '#7b8494', roof: '#9aa3b2', hex: 0x6f7888, roofHex: 0x59606e, floorHex: 0x4b5260 },
+      logs: { wall: '#7c5a3a', roof: '#a97c50', hex: 0x7c5a3a, roofHex: 0x7c5a3a, floorHex: 0x5a4a38 }
+    };
+
+    function structureStyle(structure) {
+      return STRUCTURE_STYLES[structure.material] || STRUCTURE_STYLES.timber;
+    }
+
+    // The hub structure drawn over its room: the roof shape, towers, or a fire ring with seats.
+    function drawHubStructure() {
+      const structure = dungeonData.hub.structure;
+      const style = structureStyle(structure);
+      const f = structure.footprint;
+      const cx = f.x;
+      const cz = f.z;
+      const px = view.scale;
+      ctx.save();
+      ctx.strokeStyle = style.roof;
+      ctx.lineWidth = Math.max(1.5, 0.12 * px);
+      ctx.globalAlpha = 0.85;
+      const corners = [[f.minX, f.minZ], [f.maxX, f.minZ], [f.maxX, f.maxZ], [f.minX, f.maxZ]].map(([x, z]) => worldToScreen(x, z));
+      const center = worldToScreen(cx, cz);
+      const line = (a, b) => {
+        ctx.beginPath();
+        ctx.moveTo(a.x, a.y);
+        ctx.lineTo(b.x, b.y);
+        ctx.stroke();
+      };
+      if (structure.roof === 'hip') {
+        corners.forEach((corner) => line(corner, center));
+      } else if (structure.roof === 'pitched') {
+        const alongX = f.w >= f.d;
+        const a = alongX ? worldToScreen(f.minX + 1, cz) : worldToScreen(cx, f.minZ + 1);
+        const b = alongX ? worldToScreen(f.maxX - 1, cz) : worldToScreen(cx, f.maxZ - 1);
+        line(a, b);
+        if (alongX) {
+          line(corners[0], a); line(corners[3], a); line(corners[1], b); line(corners[2], b);
+        } else {
+          line(corners[0], a); line(corners[1], a); line(corners[3], b); line(corners[2], b);
+        }
+      } else if (structure.roof === 'cone') {
+        const radius = Math.min(f.w, f.d) / 2 * px;
+        ctx.beginPath();
+        ctx.arc(center.x, center.y, radius, 0, Math.PI * 2);
+        ctx.stroke();
+        for (let i = 0; i < 8; i += 1) {
+          const angle = (i / 8) * Math.PI * 2;
+          line(center, { x: center.x + Math.cos(angle) * radius, y: center.y + Math.sin(angle) * radius });
+        }
+      } else if (structure.roof === 'battlements') {
+        ctx.setLineDash([Math.max(3, 0.7 * px), Math.max(2, 0.5 * px)]);
+        const inset = 0.7;
+        const tl = worldToScreen(f.minX + inset, f.minZ + inset);
+        const br = worldToScreen(f.maxX - inset, f.maxZ - inset);
+        ctx.strokeRect(tl.x, tl.y, br.x - tl.x, br.y - tl.y);
+        ctx.setLineDash([]);
+      }
+      ctx.globalAlpha = 1;
+      structure.parts.forEach((part) => {
+        const s = worldToScreen(part.x, part.z);
+        if (part.type === 'tower') {
+          ctx.beginPath();
+          ctx.arc(s.x, s.y, part.radius * px, 0, Math.PI * 2);
+          ctx.fillStyle = style.wall;
+          ctx.fill();
+          ctx.strokeStyle = '#0a0c10';
+          ctx.lineWidth = 2;
+          ctx.stroke();
+          ctx.beginPath();
+          ctx.arc(s.x, s.y, part.radius * px * 0.55, 0, Math.PI * 2);
+          ctx.strokeStyle = style.roof;
+          ctx.lineWidth = 1.5;
+          ctx.stroke();
+        } else if (part.type === 'fire-pit') {
+          const reach = num(part.light && part.light.distance, part.radius * 3);
+          const radius = Math.max(4, part.radius * px);
+          const glow = ctx.createRadialGradient(s.x, s.y, 1, s.x, s.y, Math.max(radius * 3, reach * px));
+          glow.addColorStop(0, 'rgba(251, 146, 60, 0.55)');
+          glow.addColorStop(1, 'rgba(251, 146, 60, 0)');
+          ctx.fillStyle = glow;
+          ctx.beginPath();
+          ctx.arc(s.x, s.y, radius * 3, 0, Math.PI * 2);
+          ctx.fill();
+          ctx.beginPath();
+          ctx.arc(s.x, s.y, radius, 0, Math.PI * 2);
+          ctx.fillStyle = '#44403c';
+          ctx.fill();
+          ctx.strokeStyle = '#a8a29e';
+          ctx.lineWidth = 2;
+          ctx.stroke();
+          ctx.beginPath();
+          ctx.arc(s.x, s.y, radius * 0.55, 0, Math.PI * 2);
+          ctx.fillStyle = '#fb923c';
+          ctx.fill();
+        } else if (part.type === 'log-seat') {
+          ctx.save();
+          ctx.translate(s.x, s.y);
+          ctx.rotate(-part.rotationY);
+          const length = Math.max(6, part.length * px);
+          const thick = Math.max(3, 0.6 * px);
+          ctx.fillStyle = style.wall;
+          ctx.strokeStyle = '#0a0c10';
+          ctx.lineWidth = 1;
+          // The log lies along its local Z, like every other prop.
+          ctx.fillRect(-thick / 2, -length / 2, thick, length);
+          ctx.strokeRect(-thick / 2, -length / 2, thick, length);
+          ctx.restore();
+        }
+      });
+      if (!structure.enterable && view.scale > 6) {
+        ctx.fillStyle = '#f8fafc';
+        ctx.font = 'bold 11px Inter, sans-serif';
+        ctx.textAlign = 'center';
+        ctx.fillText(structure.name, center.x, worldToScreen(cx, f.maxZ).y + 16);
+      }
+      ctx.restore();
+    }
+
+    function drawDoors() {
+      ctx.save();
+      ctx.lineCap = 'butt';
+      dungeonData.doors.forEach(door => {
+        if (!door?.a || !door?.b) return;
+        const start = worldToScreen(door.a[0], door.a[1]);
+        const end = worldToScreen(door.b[0], door.b[1]);
+        const isClosed = door.state === 'closed';
+        const isBoss = door.type === 'boss_gate';
+        ctx.beginPath();
+        ctx.moveTo(start.x, start.y);
+        ctx.lineTo(end.x, end.y);
+        ctx.strokeStyle = 'rgba(15, 23, 42, 0.85)';
+        ctx.lineWidth = Math.max(5, Math.min(12, 0.7 * view.scale));
+        ctx.stroke();
+        ctx.beginPath();
+        ctx.moveTo(start.x, start.y);
+        ctx.lineTo(end.x, end.y);
+        ctx.strokeStyle = isBoss ? '#ef4444' : (isClosed ? '#94a3b8' : '#f8fafc');
+        ctx.lineWidth = Math.max(2.5, Math.min(7, 0.38 * view.scale));
+        ctx.stroke();
+
+        if (view.scale > 11) {
+          const mid = worldToScreen(door.x ?? 0, door.z ?? 0);
+          ctx.fillStyle = isBoss ? '#fecaca' : '#e2e8f0';
+          ctx.font = 'bold 9px "JetBrains Mono", monospace';
+          ctx.textAlign = 'center';
+          const label = isBoss ? 'BOSS DOORS' : (door.name || door.id || 'Door');
+          ctx.fillText(label, mid.x, mid.y - 8);
+        }
+      });
+      ctx.restore();
+    }
+
+    function drawTransitions() {
+      if (!Array.isArray(dungeonData.transitions)) return;
+      ctx.save();
+      dungeonData.transitions.forEach(tr => {
+        if (!tr) return;
+        if (tr.arrival) {
+          // Where the player lands when coming in from another zone.
+          const a = worldToScreen(tr.arrival.x, tr.arrival.z);
+          ctx.setLineDash([]);
+          ctx.fillStyle = 'rgba(56, 189, 248, 0.35)';
+          ctx.strokeStyle = '#38bdf8';
+          ctx.lineWidth = 1.5;
+          ctx.beginPath();
+          ctx.moveTo(a.x, a.y - 8);
+          ctx.lineTo(a.x + 8, a.y);
+          ctx.lineTo(a.x, a.y + 8);
+          ctx.lineTo(a.x - 8, a.y);
+          ctx.closePath();
+          ctx.fill();
+          ctx.stroke();
+          if (view.scale > 8) {
+            ctx.fillStyle = '#7dd3fc';
+            ctx.font = '9px "JetBrains Mono", monospace';
+            ctx.textAlign = 'center';
+            ctx.fillText(`Arrive: ${tr.name || tr.id || 'Transition'}`, a.x, a.y + 20);
+          }
+          return;
+        }
+        const box = tr.triggerBox || extractBounds(tr);
+        const bx = box.x ?? 0;
+        const bz = box.z ?? 0;
+        const bw = box.w ?? 3.0;
+        const bd = box.d ?? 3.0;
+
+        const topLeft = worldToScreen(bx - bw / 2, bz - bd / 2);
+        const wPx = bw * view.scale;
+        const dPx = bd * view.scale;
+
+        ctx.fillStyle = 'rgba(56, 189, 248, 0.15)';
+        ctx.strokeStyle = '#38bdf8';
+        ctx.lineWidth = 1.5;
+        ctx.setLineDash([4, 4]);
+
+        ctx.fillRect(topLeft.x, topLeft.y, wPx, dPx);
+        ctx.strokeRect(topLeft.x, topLeft.y, wPx, dPx);
+
+        if (view.scale > 8) {
+          ctx.fillStyle = '#7dd3fc';
+          ctx.font = '9px "JetBrains Mono", monospace';
+          ctx.textAlign = 'center';
+          ctx.fillText(`Trigger: ${tr.name || tr.id || 'Transition'}`, topLeft.x + wPx / 2, topLeft.y + dPx / 2 + 3);
+        }
+      });
+      ctx.restore();
+    }
+
+    function drawTorches() {
+      ctx.save();
+      dungeonData.torches.forEach(t => {
+        if (!t) return;
+        const tx = t.x ?? 0;
+        const tz = t.z ?? 0;
+        const s = worldToScreen(tx, tz);
+        const rPx = Math.max(8, (t.radius || 4.5) * view.scale);
+
+        const grad = ctx.createRadialGradient(s.x, s.y, 2, s.x, s.y, rPx);
+        grad.addColorStop(0, 'rgba(249, 115, 22, 0.45)');
+        grad.addColorStop(0.3, 'rgba(234, 88, 12, 0.15)');
+        grad.addColorStop(1, 'rgba(249, 115, 22, 0.0)');
+
+        ctx.fillStyle = grad;
+        ctx.beginPath();
+        ctx.arc(s.x, s.y, rPx, 0, Math.PI * 2);
+        ctx.fill();
+
+        ctx.fillStyle = '#fb923c';
+        ctx.beginPath();
+        ctx.arc(s.x, s.y, 4, 0, Math.PI * 2);
+        ctx.fill();
+
+        ctx.fillStyle = '#fff7ed';
+        ctx.beginPath();
+        ctx.arc(s.x, s.y, 1.8, 0, Math.PI * 2);
+        ctx.fill();
+      });
+      ctx.restore();
+    }
+
+    function drawChests() {
+      ctx.save();
+      dungeonData.chests.forEach(chest => {
+        if (!chest) return;
+        const cx = chest.x ?? 0;
+        const cz = chest.z ?? 0;
+        const s = worldToScreen(cx, cz);
+        const isMaster = chest.lootTier === 'boss_master';
+        const size = isMaster ? 16 : 12;
+
+        ctx.fillStyle = isMaster ? '#d97706' : '#854d0e';
+        ctx.strokeStyle = '#facc15';
+        ctx.lineWidth = 1.5;
+
+        ctx.fillRect(s.x - size / 2, s.y - size / 2, size, size);
+        ctx.strokeRect(s.x - size / 2, s.y - size / 2, size, size);
+
+        ctx.fillStyle = '#fef08a';
+        ctx.fillRect(s.x - 2, s.y - 1, 4, 3);
+
+        if (view.scale > 9) {
+          ctx.fillStyle = '#fde047';
+          ctx.font = 'bold 9px "JetBrains Mono", monospace';
+          ctx.textAlign = 'center';
+          ctx.fillText(`[${chest.gold ?? 0}g]`, s.x, s.y + size + 2);
+        }
+      });
+      ctx.restore();
+    }
+
+    function drawEnemies() {
+      ctx.save();
+      dungeonData.enemies.forEach(enemy => {
+        if (!enemy) return;
+        const ex = enemy.x ?? 0;
+        const ez = enemy.z ?? 0;
+        const s = worldToScreen(ex, ez);
+
+        if (enemy.isBoss) {
+          const r = 14;
+          ctx.fillStyle = 'rgba(239, 68, 68, 0.25)';
+          ctx.beginPath();
+          ctx.arc(s.x, s.y, r * 1.6, 0, Math.PI * 2);
+          ctx.fill();
+
+          ctx.fillStyle = '#7f1d1d';
+          ctx.strokeStyle = '#f87171';
+          ctx.lineWidth = 2.5;
+          ctx.beginPath();
+          ctx.arc(s.x, s.y, r, 0, Math.PI * 2);
+          ctx.fill();
+          ctx.stroke();
+
+          ctx.fillStyle = '#facc15';
+          ctx.beginPath();
+          ctx.moveTo(s.x - 8, s.y + 4);
+          ctx.lineTo(s.x - 8, s.y - 4);
+          ctx.lineTo(s.x - 4, s.y);
+          ctx.lineTo(s.x, s.y - 7);
+          ctx.lineTo(s.x + 4, s.y);
+          ctx.lineTo(s.x + 8, s.y - 4);
+          ctx.lineTo(s.x + 8, s.y + 4);
+          ctx.closePath();
+          ctx.fill();
+
+          ctx.fillStyle = '#fee2e2';
+          ctx.font = 'bold 11px Inter, sans-serif';
+          ctx.textAlign = 'center';
+          ctx.fillText("SKELETON KING", s.x, s.y - 18);
+          ctx.font = '9px "JetBrains Mono", monospace';
+          ctx.fillText(`${enemy.hp ?? 400} HP`, s.x, s.y + 24);
+        } else {
+          const r = 6;
+          ctx.fillStyle = enemy.type === 'skeleton_archer' ? '#1e3a8a' : '#450a0a';
+          ctx.strokeStyle = enemy.type === 'skeleton_archer' ? '#60a5fa' : '#f87171';
+          ctx.lineWidth = 1.5;
+
+          ctx.beginPath();
+          ctx.arc(s.x, s.y, r, 0, Math.PI * 2);
+          ctx.fill();
+          ctx.stroke();
+
+          ctx.fillStyle = '#ffffff';
+          ctx.beginPath();
+          ctx.arc(s.x, s.y, 2, 0, Math.PI * 2);
+          ctx.fill();
+        }
+      });
+      ctx.restore();
+    }
+
+    function drawPlayerSpawn() {
+      const p = dungeonData.playerStart;
+      if (!p) return;
+      const px = p.x ?? 0;
+      const pz = p.z ?? 0;
+      const s = worldToScreen(px, pz);
+
+      ctx.save();
+      ctx.fillStyle = '#065f46';
+      ctx.strokeStyle = '#34d399';
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.arc(s.x, s.y, 9, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.stroke();
+
+      ctx.strokeStyle = '#a7f3d0';
+      ctx.lineWidth = 2.5;
+      ctx.beginPath();
+      ctx.moveTo(s.x, s.y);
+      const arrowLen = 18;
+      const targetX = s.x - Math.sin(p.facingYaw || 0) * arrowLen;
+      const targetY = s.y - Math.cos(p.facingYaw || 0) * arrowLen;
+      ctx.lineTo(targetX, targetY);
+      ctx.stroke();
+
+      if (view.scale > 8) {
+        ctx.fillStyle = '#6ee7b7';
+        ctx.font = 'bold 9px "JetBrains Mono", monospace';
+        ctx.textAlign = 'center';
+        ctx.fillText(p.respawn ? 'RESPAWN' : 'PC SPAWN', s.x, s.y + 18);
+      }
+      ctx.restore();
+    }
+
+    function drawEntityHighlight(entity, colorHex, isSelected) {
+      if (!entity) return;
+      ctx.save();
+      ctx.strokeStyle = colorHex;
+      ctx.lineWidth = isSelected ? 3 : 2;
+      ctx.setLineDash(isSelected ? [] : [4, 4]);
+
+      if ((entity._kind === 'room' || entity._kind === 'outdoor') && entity.polygon && entity.polygon.length >= 3) {
+        tracePolygon(entity.polygon);
+        ctx.lineWidth = isSelected ? 3 : 2;
+        ctx.stroke();
+      } else if (entity._kind === 'door' && entity.a && entity.b) {
+        const start = worldToScreen(entity.a[0], entity.a[1]);
+        const end = worldToScreen(entity.b[0], entity.b[1]);
+        ctx.beginPath();
+        ctx.moveTo(start.x, start.y);
+        ctx.lineTo(end.x, end.y);
+        ctx.lineWidth = isSelected ? 6 : 4;
+        ctx.stroke();
+      } else {
+        const ex = entity.x ?? (entity.bounds ? entity.bounds.x : 0);
+        const ez = entity.z ?? (entity.bounds ? entity.bounds.z : 0);
+        const s = worldToScreen(ex, ez);
+        ctx.beginPath();
+        ctx.arc(s.x, s.y, 16, 0, Math.PI * 2);
+        ctx.stroke();
+      }
+      ctx.restore();
+    }
+
+    // Hit detection
+    function pickEntityAt(screenX, screenY) {
+      if (!dungeonData) return null;
+      const world = screenToWorld(screenX, screenY);
+      const hitRadiusWorld = 18 / view.scale;
+
+      if (layerEnemies.checked && Array.isArray(dungeonData.enemies)) {
+        for (const enemy of dungeonData.enemies) {
+          if (!enemy) continue;
+          const ex = enemy.x ?? 0;
+          const ez = enemy.z ?? 0;
+          const dist = Math.hypot(ex - world.x, ez - world.z);
+          const r = enemy.isBoss ? 2.5 : 1.2;
+          if (dist <= r + hitRadiusWorld) return { ...enemy, _kind: 'enemy' };
+        }
+      }
+
+      if (layerChests.checked && Array.isArray(dungeonData.chests)) {
+        for (const chest of dungeonData.chests) {
+          if (!chest) continue;
+          const cx = chest.x ?? 0;
+          const cz = chest.z ?? 0;
+          const dist = Math.hypot(cx - world.x, cz - world.z);
+          if (dist <= 1.2 + hitRadiusWorld) return { ...chest, _kind: 'chest' };
+        }
+      }
+
+      if (layerDoors.checked && Array.isArray(dungeonData.doors)) {
+        for (const door of dungeonData.doors) {
+          if (!door?.a || !door?.b) continue;
+          const dist = distanceToSegment(world.x, world.z, door.a[0], door.a[1], door.b[0], door.b[1]);
+          if (dist <= 0.45 + hitRadiusWorld * 0.55) return { ...door, _kind: 'door' };
+        }
+      }
+
+      if (layerTorches.checked && Array.isArray(dungeonData.torches)) {
+        for (const torch of dungeonData.torches) {
+          if (!torch) continue;
+          const tx = torch.x ?? 0;
+          const tz = torch.z ?? 0;
+          const dist = Math.hypot(tx - world.x, tz - world.z);
+          if (dist <= 1.0 + hitRadiusWorld) return { ...torch, _kind: 'torch' };
+        }
+      }
+
+      if (layerProps.checked) {
+        for (const [list, kind] of [[dungeonData.props, 'prop'], [dungeonData.scenery, 'scenery']]) {
+          if (!Array.isArray(list)) continue;
+          for (const item of list) {
+            if (!item) continue;
+            const style = propStyle(item.type);
+            const reach = Math.max(style.w, style.d ?? style.w) * num(item.scale, 1) * 0.5;
+            const dist = Math.hypot(item.x - world.x, item.z - world.z);
+            if (dist <= reach + hitRadiusWorld * 0.6) return { ...item, _kind: kind };
+          }
+        }
+      }
+
+      if (layerSpawns.checked && dungeonData.playerStart) {
+        const p = dungeonData.playerStart;
+        const px = p.x ?? 0;
+        const pz = p.z ?? 0;
+        const dist = Math.hypot(px - world.x, pz - world.z);
+        if (dist <= 1.5 + hitRadiusWorld) return { ...p, _kind: 'playerStart', name: p.locationName || 'Player Spawn' };
+      }
+
+      const hubStructure = dungeonData.hub?.structure;
+      if (layerRooms.checked && hubStructure) {
+        const b = hubStructure.bounds;
+        const inside = world.x >= b.minX && world.x <= b.maxX && world.z >= b.minZ && world.z <= b.maxZ;
+        const inTower = hubStructure.parts.some((part) => part.type === 'tower' && Math.hypot(part.x - world.x, part.z - world.z) <= part.radius);
+        if (inTower || (!hubStructure.enterable && inside)) return { ...hubStructure, _kind: 'structure' };
+      }
+
+      if (layerRooms.checked && Array.isArray(dungeonData.rooms)) {
+        for (let i = dungeonData.rooms.length - 1; i >= 0; i--) {
+          const room = dungeonData.rooms[i];
+          if (!room?.polygon) continue;
+          if (pointInPolygon(world.x, world.z, room.polygon)) return { ...room, _kind: 'room' };
+        }
+      }
+
+      if (layerTrail.checked && Array.isArray(dungeonData.outdoor)) {
+        const areas = dungeonData.outdoor;
+        const pickOutdoor = (role) => {
+          for (let i = areas.length - 1; i >= 0; i--) {
+            const area = areas[i];
+            if (!area?.polygon || area.role !== role) continue;
+            if (pointInPolygon(world.x, world.z, area.polygon)) return { ...area, _kind: 'outdoor' };
+          }
+          return null;
+        };
+        for (let i = areas.length - 1; i >= 0; i--) {
+          const area = areas[i];
+          if (!area?.polygon || area.role === 'exterior' || area.role === 'vista') continue;
+          if (pointInPolygon(world.x, world.z, area.polygon)) return { ...area, _kind: 'outdoor' };
+        }
+        const vista = pickOutdoor('vista');
+        if (vista) return vista;
+        const ground = pickOutdoor('exterior');
+        if (ground) return ground;
+      }
+
+      if (layerHorizon.checked && Array.isArray(dungeonData.distance)) {
+        for (let i = dungeonData.distance.length - 1; i >= 0; i--) {
+          const mountain = dungeonData.distance[i];
+          if (!mountain) continue;
+          if (Math.hypot(mountain.x - world.x, mountain.z - world.z) <= mountain.radius) {
+            return { ...mountain, _kind: 'mountain' };
+          }
+        }
+      }
+
+      return null;
+    }
+
+    function selectEntity(item) {
+      selectedEntity = item;
+      render();
+      if (view3d) view3d.syncSelection();
+
+      if (!item) {
+        inspectorEmptyState.classList.remove('hidden');
+        inspectorContent.classList.add('hidden');
+        inspectorCategory.textContent = 'None';
+        return;
+      }
+
+      inspectorEmptyState.classList.add('hidden');
+      inspectorContent.classList.remove('hidden');
+
+      inspectorCategory.textContent = (item._kind || 'Entity').toUpperCase();
+      inspTitle.textContent = item.name || item.id || 'Unnamed Entity';
+      inspSubtitle.textContent = `Type: ${item.type || item._kind || 'Unknown'} | ID: ${item.id || 'N/A'}`;
+
+      const b = item.bounds || (item.triggerBox ? item.triggerBox : null);
+      const posX = item.x !== undefined ? item.x : (b && b.x !== undefined ? b.x : 0);
+      const posY = item.y !== undefined ? item.y : (item.floorY !== undefined ? item.floorY : (b && b.y !== undefined ? b.y : 0));
+      const posZ = item.z !== undefined ? item.z : (b && b.z !== undefined ? b.z : 0);
+
+      inspPosX.textContent = Number(posX).toFixed(1);
+      inspPosY.textContent = Number(posY).toFixed(1);
+      inspPosZ.textContent = Number(posZ).toFixed(1);
+      inspFloorTag.textContent = `Elevation: ${Number(posY).toFixed(1)}m`;
+
+      if (b) {
+        inspDimensionsRow.classList.remove('hidden');
+        inspWidth.textContent = (b.w ?? 0).toFixed(1);
+        inspHeight.textContent = (b.h ?? 4).toFixed(1);
+        inspDepth.textContent = (b.d ?? 0).toFixed(1);
+      } else {
+        inspDimensionsRow.classList.add('hidden');
+      }
+
+      inspAttributes.replaceChildren();
+      const skipKeys = ['_kind', 'bounds', 'triggerBox', 'name', 'id', 'x', 'y', 'z', 'points', 'polygon', 'rect', 'spawns', 'a', 'b', 'mouthA', 'mouthB', 'rocks', 'props', 'parts', 'footprint', 'samples', 'door', 'arrival', 'vfx', 'light'];
+      Object.keys(item).forEach(key => {
+        if (skipKeys.includes(key) || item[key] == null) return;
+        const row = document.createElement('div');
+        row.className = 'py-1 flex justify-between items-center gap-2';
+        const keyEl = document.createElement('span');
+        keyEl.className = 'text-slate-400 capitalize';
+        keyEl.textContent = key;
+        const valEl = document.createElement('span');
+        valEl.className = 'text-amber-300 font-semibold truncate max-w-[150px]';
+        const val = typeof item[key] === 'object' ? JSON.stringify(item[key]) : String(item[key]);
+        valEl.textContent = val;
+        valEl.title = val;
+        row.append(keyEl, valEl);
+        inspAttributes.appendChild(row);
+      });
+
+      inspRawJson.textContent = JSON.stringify(item, null, 2);
+    }
+
+    function expandBounds(minX, maxX, minZ, maxZ, x, z) {
+      return [Math.min(minX, x), Math.max(maxX, x), Math.min(minZ, z), Math.max(maxZ, z)];
+    }
+
+    function boundsOfPolygon(polygon, minX, maxX, minZ, maxZ) {
+      if (!polygon) return [minX, maxX, minZ, maxZ];
+      for (const [x, z] of polygon) {
+        [minX, maxX, minZ, maxZ] = expandBounds(minX, maxX, minZ, maxZ, x, z);
+      }
+      return [minX, maxX, minZ, maxZ];
+    }
+
+    function zoomToFit() {
+      if (!dungeonData) return;
+      const hasRooms = Array.isArray(dungeonData.rooms) && dungeonData.rooms.length > 0;
+      const hasOutdoor = Array.isArray(dungeonData.outdoor) && dungeonData.outdoor.length > 0;
+      if (!hasRooms && !hasOutdoor) return;
+
+      let minX = Infinity, maxX = -Infinity, minZ = Infinity, maxZ = -Infinity;
+
+      (dungeonData.rooms || []).forEach(room => {
+        if (!room) return;
+        if (room.polygon) {
+          [minX, maxX, minZ, maxZ] = boundsOfPolygon(room.polygon, minX, maxX, minZ, maxZ);
+          return;
+        }
+        const b = room.bounds || extractBounds(room);
+        [minX, maxX, minZ, maxZ] = expandBounds(minX, maxX, minZ, maxZ, (b.x ?? 0) - (b.w ?? 6) / 2, (b.z ?? 0) - (b.d ?? 6) / 2);
+        [minX, maxX, minZ, maxZ] = expandBounds(minX, maxX, minZ, maxZ, (b.x ?? 0) + (b.w ?? 6) / 2, (b.z ?? 0) + (b.d ?? 6) / 2);
+      });
+
+      (dungeonData.outdoor || []).forEach(area => {
+        [minX, maxX, minZ, maxZ] = boundsOfPolygon(area.polygon, minX, maxX, minZ, maxZ);
+      });
+
+      if (dungeonData.trail && Array.isArray(dungeonData.trail.points)) {
+        dungeonData.trail.points.forEach(p => {
+          if (!p) return;
+          [minX, maxX, minZ, maxZ] = expandBounds(minX, maxX, minZ, maxZ, p.x ?? 0, p.z ?? 0);
+        });
+      }
+
+      if (!isFinite(minX) || !isFinite(maxX) || !isFinite(minZ) || !isFinite(maxZ)) {
+        view.x = 0;
+        view.y = 0;
+        view.scale = 12.0;
+        render();
+        return;
+      }
+
+      const worldW = Math.max(10, (maxX - minX) * 1.25);
+      const worldH = Math.max(10, (maxZ - minZ) * 1.25);
+
+      view.x = (minX + maxX) / 2;
+      view.y = (minZ + maxZ) / 2;
+
+      const scaleX = canvas.width / worldW;
+      const scaleY = canvas.height / worldH;
+      view.scale = Math.max(view.minScale, Math.min(view.maxScale, Math.min(scaleX, scaleY)));
+
+      render();
+    }
+
+    function focusOnCoordinates(wx, wz, wy = 0) {
+      view.x = wx;
+      view.y = wz;
+      view.scale = Math.max(view.scale, 18.0);
+      render();
+      if (viewMode === '3d' && view3d) view3d.focus(wx, wy, wz);
+    }
+
+    function fitActive() {
+      if (viewMode === '3d' && view3d) view3d.fit();
+      else zoomToFit();
+    }
+
+    // Navigation Events
+    canvas.addEventListener('mousedown', (e) => {
+      if (e.button === 0 || e.button === 1) {
+        view.isPanning = true;
+        view.lastMouseX = e.clientX;
+        view.lastMouseY = e.clientY;
+        canvas.classList.add('custom-canvas-panning');
+      }
+    });
+
+    window.addEventListener('mouseup', () => {
+      view.isPanning = false;
+      canvas.classList.remove('custom-canvas-panning');
+    });
+
+    canvas.addEventListener('mousemove', (e) => {
+      const rect = canvas.getBoundingClientRect();
+      const mouseX = e.clientX - rect.left;
+      const mouseY = e.clientY - rect.top;
+
+      const world = screenToWorld(mouseX, mouseY);
+      cursorCoordX.textContent = world.x.toFixed(1);
+      cursorCoordZ.textContent = world.z.toFixed(1);
+
+      if (view.isPanning) {
+        const dx = e.clientX - view.lastMouseX;
+        const dy = e.clientY - view.lastMouseY;
+        view.x -= dx / view.scale;
+        view.y -= dy / view.scale;
+        view.lastMouseX = e.clientX;
+        view.lastMouseY = e.clientY;
+        render();
+      } else {
+        const item = pickEntityAt(mouseX, mouseY);
+        if (item !== hoveredEntity) {
+          hoveredEntity = item;
+          render();
+        }
+      }
+    });
+
+    canvas.addEventListener('click', (e) => {
+      const rect = canvas.getBoundingClientRect();
+      const mouseX = e.clientX - rect.left;
+      const mouseY = e.clientY - rect.top;
+      selectEntity(pickEntityAt(mouseX, mouseY));
+    });
+
+    canvas.addEventListener('wheel', (e) => {
+      e.preventDefault();
+      const rect = canvas.getBoundingClientRect();
+      const mouseX = e.clientX - rect.left;
+      const mouseY = e.clientY - rect.top;
+
+      const worldBefore = screenToWorld(mouseX, mouseY);
+      const zoomFactor = e.deltaY < 0 ? 1.15 : 0.87;
+      const newScale = Math.max(view.minScale, Math.min(view.maxScale, view.scale * zoomFactor));
+
+      if (newScale !== view.scale) {
+        view.scale = newScale;
+        const worldAfter = screenToWorld(mouseX, mouseY);
+        view.x += worldBefore.x - worldAfter.x;
+        view.y += worldBefore.z - worldAfter.z;
+        render();
+      }
+    }, { passive: false });
+
+    // Toolbar Buttons
+    document.getElementById('btnZoomIn').addEventListener('click', () => {
+      if (viewMode === '3d' && view3d) {
+        view3d.dolly(0.8);
+        return;
+      }
+      view.scale = Math.min(view.maxScale, view.scale * 1.25);
+      render();
+    });
+
+    document.getElementById('btnZoomOut').addEventListener('click', () => {
+      if (viewMode === '3d' && view3d) {
+        view3d.dolly(1.25);
+        return;
+      }
+      view.scale = Math.max(view.minScale, view.scale * 0.8);
+      render();
+    });
+
+    document.getElementById('btnFit').addEventListener('click', fitActive);
+
+    btnFocusSelected.addEventListener('click', () => {
+      if (!selectedEntity) return;
+      const b = selectedEntity.bounds || extractBounds(selectedEntity);
+      const x = selectedEntity.x !== undefined ? selectedEntity.x : b.x;
+      const z = selectedEntity.z !== undefined ? selectedEntity.z : b.z;
+      focusOnCoordinates(x, z, num(selectedEntity.y ?? selectedEntity.floorY));
+    });
+
+    btnCopyEntityJson.addEventListener('click', () => {
+      if (!selectedEntity) return;
+      const text = JSON.stringify(selectedEntity, null, 2);
+      const el = document.createElement('textarea');
+      el.value = text;
+      document.body.appendChild(el);
+      el.select();
+      document.execCommand('copy');
+      document.body.removeChild(el);
+
+      btnCopyEntityJson.innerHTML = `<i class="ph ph-check"></i> Copied!`;
+      setTimeout(() => {
+        btnCopyEntityJson.innerHTML = `<i class="ph ph-copy"></i> Copy`;
+      }, 1500);
+    });
+
+    [layerRooms, layerTrail, layerHorizon, layerDoors, layerTorches, layerChests, layerEnemies, layerProps, layerSpawns, layerGrid].forEach(cb => {
+      cb.addEventListener('change', () => {
+        render();
+        if (view3d) view3d.applyLayers();
+      });
+    });
+
+    // Search filter
+    searchInput.addEventListener('input', () => {
+      const q = searchInput.value.toLowerCase().trim();
+      clearSearchBtn.classList.toggle('hidden', q.length === 0);
+
+      if (!q || !dungeonData) {
+        searchResults.classList.add('hidden');
+        return;
+      }
+
+      const hits = [];
+      // Rooms are searched across every floor; picking one switches to its floor.
+      ((fullDungeonData || dungeonData).rooms || []).forEach(r => {
+        const marker = roomMarker(r);
+        const byName = (r.name && r.name.toLowerCase().includes(q)) || (r.id && r.id.toLowerCase().includes(q));
+        const byMarker = marker !== null && q.length >= 2 && marker.includes(q);
+        if (byName || byMarker) {
+          const sub = marker ? `${MARKER_STYLES[marker].label} (${r.id})` : `Room (${r.id})`;
+          hits.push({ label: r.name, sub, kind: 'room', target: r });
+        }
+      });
+      if (dungeonData.enemies) {
+        dungeonData.enemies.forEach(e => {
+          if ((e.name && e.name.toLowerCase().includes(q)) || (e.weapon && e.weapon.toLowerCase().includes(q))) {
+            hits.push({ label: e.name, sub: `${e.isBoss ? '👑 Boss' : 'Enemy'}`, kind: 'enemy', target: e });
+          }
+        });
+      }
+      if (dungeonData.chests) {
+        dungeonData.chests.forEach(c => {
+          if ((c.name && c.name.toLowerCase().includes(q)) || (c.id && c.id.toLowerCase().includes(q))) {
+            hits.push({ label: c.name, sub: `Chest (${c.gold ?? 0}g)`, kind: 'chest', target: c });
+          }
+        });
+      }
+      if (dungeonData.doors) {
+        dungeonData.doors.forEach(door => {
+          const label = door.name || door.id || '';
+          if (label.toLowerCase().includes(q) || (door.from && door.from.toLowerCase().includes(q)) || (door.to && door.to.toLowerCase().includes(q))) {
+            hits.push({ label, sub: 'Door', kind: 'door', target: door });
+          }
+        });
+      }
+      if (dungeonData.outdoor) {
+        dungeonData.outdoor.forEach(area => {
+          if ((area.name && area.name.toLowerCase().includes(q)) || (area.id && area.id.toLowerCase().includes(q))) {
+            hits.push({ label: area.name, sub: area.role === 'spoke' ? 'Hub spoke' : 'Outdoor', kind: 'outdoor', target: area });
+          }
+        });
+      }
+      const hubStructure = dungeonData.hub && dungeonData.hub.structure;
+      if (hubStructure && ((hubStructure.name || '').toLowerCase().includes(q) || hubStructure.type.toLowerCase().includes(q))) {
+        hits.push({ label: hubStructure.name, sub: 'Hub structure', kind: 'structure', target: hubStructure });
+      }
+      const start = dungeonData.playerStart;
+      if (start && start.respawn && ('respawn spawn start').includes(q)) {
+        hits.push({ label: 'Respawn', sub: 'Spawn point', kind: 'playerStart', target: start });
+      }
+
+      function escapeHtml(value) {
+        return String(value ?? '').replace(/[&<>"']/g, (ch) => ({
+          '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'
+        })[ch]);
+      }
+
+      if (hits.length === 0) {
+        searchResults.innerHTML = `<div class="px-3 py-2 text-slate-500 text-[11px]">No matches found.</div>`;
+      } else {
+        searchResults.innerHTML = hits.slice(0, 8).map((h, i) => `
+          <button data-index="${i}" class="w-full text-left px-3 py-1.5 hover:bg-dungeon-800 flex items-center justify-between transition">
+            <span class="text-slate-200 truncate font-semibold text-xs">${escapeHtml(h.label)}</span>
+            <span class="text-[10px] text-amber-400 font-mono">${escapeHtml(h.sub)}</span>
+          </button>
+        `).join('');
+
+        Array.from(searchResults.querySelectorAll('button')).forEach((btn, idx) => {
+          btn.addEventListener('click', () => {
+            const match = hits[idx];
+            if (match.kind === 'room') revealRoom(match.target);
+            const item = { ...match.target, _kind: match.kind };
+            selectEntity(item);
+            const b = item.bounds || extractBounds(item);
+            const x = item.x !== undefined ? item.x : b.x;
+            const z = item.z !== undefined ? item.z : b.z;
+            focusOnCoordinates(x, z, num(item.y ?? item.floorY));
+            searchResults.classList.add('hidden');
+          });
+        });
+      }
+      searchResults.classList.remove('hidden');
+    });
+
+    clearSearchBtn.addEventListener('click', () => {
+      searchInput.value = '';
+      clearSearchBtn.classList.add('hidden');
+      searchResults.classList.add('hidden');
+    });
+
+    function updateMetadataAndStats() {
+      if (!dungeonData) return;
+      const opts = dungeonData.options;
+      let optionText = opts ? ` • density ${String(opts.density ?? 'normal')}, clutter ${String(opts.clutter ?? '')}` : '';
+      if (dungeonData.hub) {
+        const spokes = Array.isArray(opts?.spokes) ? opts.spokes.length : dungeonData.hub.spokes.length;
+        optionText = ` • ${dungeonData.hub.structure ? dungeonData.hub.structure.name : 'no structure'}, ${spokes} spokes, clutter ${String(opts?.clutter ?? '')}`;
+      }
+      mapHeaderSubtitle.textContent = `${dungeonData.name || 'Unnamed Dungeon'} • ${dungeonData.rooms ? dungeonData.rooms.length : 0} Chambers${optionText}`;
+      statProps.textContent = (dungeonData.props ? dungeonData.props.length : 0) + (dungeonData.scenery ? dungeonData.scenery.length : 0);
+      statRooms.textContent = dungeonData.rooms ? dungeonData.rooms.length : 0;
+      statEnemies.textContent = dungeonData.enemies ? dungeonData.enemies.length : 0;
+      statChests.textContent = dungeonData.chests ? dungeonData.chests.length : 0;
+      statTorches.textContent = dungeonData.torches ? dungeonData.torches.length : 0;
+    }
+
+    function applyNewDungeonData(rawData) {
+      try {
+        const normalized = normalizeDungeonData(rawData);
+        fullDungeonData = normalized;
+        activeFloor = null;
+        dungeonData = normalized;
+        selectedEntity = null;
+        hoveredEntity = null;
+        selectEntity(null);
+        updateMetadataAndStats();
+        buildFloorSelector();
+        updateLandmarkPanel();
+        zoomToFit();
+        if (view3d) {
+          view3d.rebuild();
+          if (viewMode === '3d') view3d.fit();
+        }
+        showToast("Layout parsed and rendered successfully!", false);
+      } catch (err) {
+        showToast("Parser Error: " + err.message, true);
+      }
+    }
+
+    // Switch to the room's floor when another floor is showing, so the room is on screen.
+    function revealRoom(room) {
+      const floors = itemFloors(room);
+      if (activeFloor !== null && !floors.includes(activeFloor)) setActiveFloor(floors[0]);
+    }
+
+    function goToMarker(kind) {
+      const room = ((fullDungeonData && fullDungeonData.rooms) || []).find((r) => roomMarker(r) === kind);
+      if (!room) {
+        showToast(`This layout has no ${kind}.`, true);
+        return;
+      }
+      revealRoom(room);
+      const shown = (dungeonData.rooms || []).find((r) => r.id === room.id) || room;
+      selectEntity({ ...shown, _kind: 'room' });
+      const b = shown.bounds || extractBounds(shown);
+      focusOnCoordinates(b.x, b.z, num(shown.floorY));
+    }
+
+    btnGoEntrance.addEventListener('click', () => goToMarker('entrance'));
+    btnGoExit.addEventListener('click', () => goToMarker('exit'));
+    btnGoExitTrail.addEventListener('click', () => {
+      const area = ((fullDungeonData && fullDungeonData.outdoor) || []).find((item) => item.id === 'exit-trail');
+      if (!area) return;
+      if (activeFloor !== null && activeFloor !== 0) setActiveFloor(0);
+      const shown = ((dungeonData && dungeonData.outdoor) || []).find((item) => item.id === 'exit-trail') || area;
+      goToHubItem(shown, 'outdoor');
+    });
+
+    // Hub landmarks: the respawn point and one button for each spoke.
+    function goToHubItem(item, kind) {
+      selectEntity({ ...item, _kind: kind });
+      focusOnCoordinates(num(item.x), num(item.z), 0);
+    }
+
+    btnGoRespawn.addEventListener('click', () => {
+      const start = fullDungeonData && fullDungeonData.playerStart;
+      if (start && start.respawn) goToHubItem(start, 'playerStart');
+    });
+
+    function updateLandmarkPanel() {
+      const rooms = (fullDungeonData && fullDungeonData.rooms) || [];
+      const hasEntrance = rooms.some((r) => roomMarker(r) === 'entrance');
+      const hasExit = rooms.some((r) => roomMarker(r) === 'exit');
+      const hasExitTrail = ((fullDungeonData && fullDungeonData.outdoor) || []).some((area) => area.id === 'exit-trail');
+      const hasRespawn = !!(fullDungeonData && fullDungeonData.playerStart && fullDungeonData.playerStart.respawn);
+      const spokes = (fullDungeonData && fullDungeonData.hub && fullDungeonData.hub.spokes) || [];
+      btnGoEntrance.classList.toggle('hidden', !hasEntrance);
+      btnGoExit.classList.toggle('hidden', !hasExit);
+      btnGoExitTrail.classList.toggle('hidden', !hasExitTrail);
+      btnGoRespawn.classList.toggle('hidden', !hasRespawn);
+      spokeButtons.replaceChildren();
+      spokes.forEach((spoke) => {
+        const button = document.createElement('button');
+        button.type = 'button';
+        button.className = 'w-full px-2 py-1 rounded border border-amber-400/60 text-amber-300 hover:bg-amber-400/10 text-[11px] flex items-center justify-between transition';
+        const label = document.createElement('span');
+        label.className = 'truncate';
+        label.textContent = `Spoke: ${spoke.name}`;
+        const hint = document.createElement('span');
+        hint.className = 'text-[9px] text-amber-400/80';
+        hint.textContent = 'go to';
+        button.append(label, hint);
+        button.addEventListener('click', () => goToHubItem(spoke.area, 'outdoor'));
+        spokeButtons.appendChild(button);
+      });
+      landmarkPanel.classList.toggle('hidden', !hasEntrance && !hasExit && !hasExitTrail && !hasRespawn && spokes.length === 0);
+    }
+
+    // Floor selector: "All" or one story. Shown only when the layout has more than one floor.
+    function buildFloorSelector() {
+      const floors = listFloors(fullDungeonData);
+      floorSelector.replaceChildren();
+      if (floors.length < 2) {
+        floorSelector.classList.add('hidden');
+        return;
+      }
+      floorSelector.classList.remove('hidden');
+      const choices = [{ label: 'All', value: null }, ...floors.map((floor) => ({ label: `F${floor + 1}`, value: floor }))];
+      choices.forEach((choice) => {
+        const button = document.createElement('button');
+        button.type = 'button';
+        button.textContent = choice.label;
+        button.title = choice.value === null ? 'Show every floor' : `Show floor ${choice.value + 1} only (y ${choice.value * STORY_HEIGHT} m)`;
+        const on = activeFloor === choice.value;
+        button.className = on
+          ? 'px-2 py-1.5 text-xs font-medium bg-amber-500/20 text-amber-200'
+          : 'px-2 py-1.5 text-xs font-medium text-slate-300 hover:bg-dungeon-800';
+        button.addEventListener('click', () => setActiveFloor(choice.value));
+        floorSelector.appendChild(button);
+      });
+    }
+
+    function setActiveFloor(floor) {
+      if (!fullDungeonData || floor === activeFloor) return;
+      activeFloor = floor;
+      dungeonData = filterByFloor(fullDungeonData, floor);
+      selectedEntity = null;
+      hoveredEntity = null;
+      selectEntity(null);
+      buildFloorSelector();
+      render();
+      if (view3d) {
+        view3d.rebuild();
+        if (viewMode === '3d') view3d.fit();
+      }
+    }
+
+    // Modal & Upload
+    btnOpenPasteModal.addEventListener('click', () => {
+      jsonEditorArea.value = JSON.stringify(fullDungeonData || dungeonData, null, 2);
+      jsonErrorBanner.classList.add('hidden');
+      jsonModal.classList.remove('hidden');
+    });
+
+    btnCloseModal.addEventListener('click', () => jsonModal.classList.add('hidden'));
+    btnCancelModal.addEventListener('click', () => jsonModal.classList.add('hidden'));
+
+    btnFormatJson.addEventListener('click', () => {
+      try {
+        const parsed = JSON.parse(jsonEditorArea.value);
+        jsonEditorArea.value = JSON.stringify(parsed, null, 2);
+        jsonErrorBanner.classList.add('hidden');
+      } catch (err) {
+        jsonErrorBanner.querySelector('span').textContent = err.message;
+        jsonErrorBanner.classList.remove('hidden');
+      }
+    });
+
+    btnLoadExampleInModal.addEventListener('click', () => {
+      jsonEditorArea.value = JSON.stringify(SAMPLE_ANCIENT_RUINS_DATA, null, 2);
+      jsonErrorBanner.classList.add('hidden');
+    });
+
+    btnApplyJson.addEventListener('click', () => {
+      try {
+        const parsed = JSON.parse(jsonEditorArea.value);
+        applyNewDungeonData(parsed);
+        jsonModal.classList.add('hidden');
+      } catch (err) {
+        jsonErrorBanner.querySelector('span').textContent = 'JSON Syntax Error: ' + err.message;
+        jsonErrorBanner.classList.remove('hidden');
+      }
+    });
+
+    btnSample.addEventListener('click', () => {
+      applyNewDungeonData(SAMPLE_ANCIENT_RUINS_DATA);
+    });
+
+    window.addEventListener('dragover', (e) => e.preventDefault());
+    window.addEventListener('drop', (e) => {
+      e.preventDefault();
+      if (e.dataTransfer.files && e.dataTransfer.files.length > 0) {
+        loadFile(e.dataTransfer.files[0]);
+      }
+    });
+
+    fileUploadInput.addEventListener('change', (e) => {
+      if (e.target.files && e.target.files.length > 0) {
+        loadFile(e.target.files[0]);
+      }
+    });
+
+    function loadFile(file) {
+      const reader = new FileReader();
+      reader.onload = (event) => {
+        try {
+          const parsed = JSON.parse(event.target.result);
+          applyNewDungeonData(parsed);
+        } catch (err) {
+          showToast('JSON Parse Error: ' + err.message, true);
+        }
+      };
+      reader.readAsText(file);
+    }
+
+    window.addEventListener('keydown', (e) => {
+      if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') return;
+      if (e.code === 'Space') {
+        e.preventDefault();
+        fitActive();
+      } else if (e.key === 'Escape') {
+        selectEntity(null);
+        searchResults.classList.add('hidden');
+      }
+    });
+
+    const view3dCanvas = document.getElementById('view3dCanvas');
+    const view3dFallback = document.getElementById('view3dFallback');
+    const view3dFallbackText = document.getElementById('view3dFallbackText');
+    const controlsHint = document.getElementById('controlsHint');
+    const btnViewPlan = document.getElementById('btnViewPlan');
+    const btnView3d = document.getElementById('btnView3d');
+    let threeBundlePromise = null;
+
+    function loadThree() {
+      if (!threeBundlePromise) {
+        threeBundlePromise = (async () => {
+          const THREE = await import('three');
+          const controlsModule = await import('three/addons/controls/OrbitControls.js');
+          return { THREE, OrbitControls: controlsModule.OrbitControls };
+        })();
+      }
+      return threeBundlePromise.then((bundle) => bundle, (err) => {
+        threeBundlePromise = null;
+        throw err;
+      });
+    }
+
+    function canonicalEdge(ax, az, bx, bz) {
+      let dx = bx - ax;
+      let dz = bz - az;
+      const length = Math.hypot(dx, dz) || 1;
+      dx /= length;
+      dz /= length;
+      if (dx < -1e-6 || (Math.abs(dx) <= 1e-6 && dz < 0)) {
+        dx = -dx;
+        dz = -dz;
+      }
+      const nx = -dz;
+      const nz = dx;
+      return { dx, dz, nx, nz, offset: ax * nx + az * nz };
+    }
+
+    function pointOnEdge(line, t) {
+      return [line.offset * line.nx + t * line.dx, line.offset * line.nz + t * line.dz];
+    }
+
+    function mergeIntervals(intervals) {
+      const sorted = intervals.slice().sort((a, b) => a[0] - b[0]);
+      const merged = [];
+      for (const span of sorted) {
+        const last = merged[merged.length - 1];
+        if (!last || span[0] > last[1] + 0.02) merged.push([span[0], span[1]]);
+        else last[1] = Math.max(last[1], span[1]);
+      }
+      return merged;
+    }
+
+    function subtractIntervals(covers, gaps) {
+      let pieces = mergeIntervals(covers);
+      for (const gap of gaps) {
+        const next = [];
+        for (const piece of pieces) {
+          if (gap[1] <= piece[0] + 0.02 || gap[0] >= piece[1] - 0.02) {
+            next.push(piece);
+            continue;
+          }
+          if (gap[0] > piece[0] + 0.02) next.push([piece[0], gap[0]]);
+          if (gap[1] < piece[1] - 0.02) next.push([gap[1], piece[1]]);
+        }
+        pieces = next;
+      }
+      return pieces.filter((piece) => piece[1] - piece[0] > 0.2);
+    }
+
+    // A room's wall levels. A normal room has one, 10 m tall, at its floor. A two-story
+    // stairwell has two stacked levels, so each floor's doors cut their own opening.
+    function roomLevels(room) {
+      const base = num(room.floorY);
+      const story = Math.max(1, num(room.storyHeight, STORY_HEIGHT));
+      const count = Math.max(1, Math.round(story / STORY_HEIGHT));
+      const height = story / count;
+      return Array.from({ length: count }, (_, step) => ({ y0: base + step * height, height }));
+    }
+
+    function buildWallPieces(rooms, doors) {
+      const DOOR_HEIGHT = 7;
+      // Doors sit at their level's floor. This slack also lets older files with half-step
+      // floors (for example y -2.5 against a door at y 0) keep their openings.
+      const DOOR_LEVEL_SLACK = 2.6;
+      const groups = new Map();
+      for (const room of rooms) {
+        const polygon = room.polygon;
+        if (!polygon) continue;
+        for (const level of roomLevels(room)) {
+          for (let i = 0; i < polygon.length; i += 1) {
+            const a = polygon[i];
+            const b = polygon[(i + 1) % polygon.length];
+            const line = canonicalEdge(a[0], a[1], b[0], b[1]);
+            const key = `${line.dx.toFixed(4)}|${line.dz.toFixed(4)}|${line.offset.toFixed(3)}|${level.y0.toFixed(2)}`;
+            let group = groups.get(key);
+            if (!group) {
+              group = { ...line, y0: level.y0, height: level.height, covers: [] };
+              groups.set(key, group);
+            }
+            const t1 = a[0] * group.dx + a[1] * group.dz;
+            const t2 = b[0] * group.dx + b[1] * group.dz;
+            group.covers.push({ t0: Math.min(t1, t2), t1: Math.max(t1, t2), room });
+          }
+        }
+      }
+
+      const pieces = [];
+      for (const group of groups.values()) {
+        const gaps = [];
+        for (const door of doors) {
+          if (!door?.a || !door?.b) continue;
+          if (Math.abs(num(door.y) - group.y0) > DOOR_LEVEL_SLACK) continue;
+          const distA = Math.abs(door.a[0] * group.nx + door.a[1] * group.nz - group.offset);
+          const distB = Math.abs(door.b[0] * group.nx + door.b[1] * group.nz - group.offset);
+          if (distA > 0.4 || distB > 0.4) continue;
+          const tA = door.a[0] * group.dx + door.a[1] * group.dz;
+          const tB = door.b[0] * group.dx + door.b[1] * group.dz;
+          gaps.push({
+            t0: Math.min(tA, tB),
+            t1: Math.max(tA, tB),
+            height: door.height || DOOR_HEIGHT,
+            door
+          });
+        }
+        const corridorOnly = group.covers.length > 0 && group.covers.every((cover) => cover.room.kind === 'corridor');
+        const color = corridorOnly ? 0x343c4c : 0x556276;
+        const coverSpans = group.covers.map((cover) => [cover.t0, cover.t1]);
+        for (const [t0, t1] of subtractIntervals(coverSpans, gaps.map((gap) => [gap.t0, gap.t1]))) {
+          const [ax, az] = pointOnEdge(group, t0);
+          const [bx, bz] = pointOnEdge(group, t1);
+          const host = group.covers.find((cover) => cover.t1 >= t0 - 0.02 && cover.t0 <= t1 + 0.02);
+          pieces.push({ ax, az, bx, bz, y0: group.y0, height: group.height, color, room: host?.room || null, door: null, opening: false });
+        }
+        for (const gap of gaps) {
+          const mid = (gap.t0 + gap.t1) / 2;
+          const onWall = group.covers.some((cover) => mid >= cover.t0 - 0.05 && mid <= cover.t1 + 0.05);
+          if (!onWall || gap.t1 - gap.t0 < 0.5) continue;
+          const [ax, az] = pointOnEdge(group, gap.t0);
+          const [bx, bz] = pointOnEdge(group, gap.t1);
+          const sill = Math.min(group.height - 1.2, Math.max(6.2, gap.height));
+          pieces.push({
+            ax, az, bx, bz,
+            y0: group.y0 + sill,
+            height: group.height - sill,
+            color: 0x6b7280,
+            room: null,
+            door: gap.door,
+            opening: false
+          });
+          pieces.push({
+            ax, az, bx, bz,
+            y0: group.y0,
+            height: sill,
+            color: 0xe2e8f0,
+            room: null,
+            door: gap.door,
+            opening: true
+          });
+        }
+      }
+      return pieces;
+    }
+
+    async function createView3D(targetCanvas) {
+      const { THREE, OrbitControls } = await loadThree();
+      const WALL_THICKNESS = 1;
+      const scene = new THREE.Scene();
+      scene.background = new THREE.Color(0x0a0c10);
+      const camera = new THREE.PerspectiveCamera(48, 1, 0.1, 2000);
+      camera.position.set(24, 28, 36);
+      const renderer = new THREE.WebGLRenderer({ canvas: targetCanvas, antialias: true });
+      renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
+      if (THREE.SRGBColorSpace) renderer.outputColorSpace = THREE.SRGBColorSpace;
+
+      scene.add(new THREE.AmbientLight(0xd6e2f0, 0.55));
+      const sun = new THREE.DirectionalLight(0xfff4dd, 1.15);
+      sun.position.set(40, 70, 24);
+      scene.add(sun);
+      scene.add(new THREE.HemisphereLight(0xc5d4e8, 0x3a2e24, 0.45));
+
+      const content = new THREE.Group();
+      scene.add(content);
+      const roomsGroup = new THREE.Group();
+      const outdoorGroup = new THREE.Group();
+      const doorsGroup = new THREE.Group();
+      const torchesGroup = new THREE.Group();
+      const chestsGroup = new THREE.Group();
+      const enemiesGroup = new THREE.Group();
+      const decorGroup = new THREE.Group();
+      const propsGroup = new THREE.Group();
+      const playerGroup = new THREE.Group();
+      const transitionsGroup = new THREE.Group();
+      const gridGroup = new THREE.Group();
+      const hubGroup = new THREE.Group();
+      const farGroup = new THREE.Group();
+      content.add(outdoorGroup, roomsGroup, hubGroup, doorsGroup, decorGroup, propsGroup, torchesGroup, chestsGroup, enemiesGroup, playerGroup, transitionsGroup, gridGroup);
+      scene.add(farGroup);
+      let skyMesh = null;
+
+      const controls = new OrbitControls(camera, targetCanvas);
+      controls.enableDamping = true;
+      controls.dampingFactor = 0.08;
+      controls.screenSpacePanning = true;
+      controls.maxPolarAngle = Math.PI * 0.49;
+      controls.mouseButtons.RIGHT = THREE.MOUSE.PAN;
+      controls.target.set(0, 0, 0);
+
+      const raycaster = new THREE.Raycaster();
+      const pointer = new THREE.Vector2();
+      let pointerDown = null;
+      let raf = 0;
+      let running = false;
+
+      function disposeGroup(group) {
+        const removed = [...group.children];
+        for (const child of removed) {
+          group.remove(child);
+          child.traverse((node) => {
+            if (node.geometry) node.geometry.dispose();
+            const materials = node.material ? (Array.isArray(node.material) ? node.material : [node.material]) : [];
+            materials.forEach((material) => {
+              if (material.map && material.map.dispose) material.map.dispose();
+              if (material.dispose) material.dispose();
+            });
+          });
+        }
+      }
+
+      function clearContent() {
+        [roomsGroup, hubGroup, outdoorGroup, doorsGroup, torchesGroup, chestsGroup, enemiesGroup, decorGroup, propsGroup, playerGroup, transitionsGroup, gridGroup, farGroup].forEach(disposeGroup);
+      }
+
+      function ensureSky() {
+        if (skyMesh) return skyMesh;
+        const canvas = document.createElement('canvas');
+        canvas.width = 8;
+        canvas.height = 256;
+        const paint = canvas.getContext('2d');
+        const gradient = paint.createLinearGradient(0, 0, 0, 256);
+        gradient.addColorStop(0, '#2f7eb8');
+        gradient.addColorStop(0.38, '#7eb4d6');
+        gradient.addColorStop(0.72, '#c5dcea');
+        gradient.addColorStop(1, '#d5e4ee');
+        paint.fillStyle = gradient;
+        paint.fillRect(0, 0, 8, 256);
+        const texture = new THREE.CanvasTexture(canvas);
+        if (THREE.SRGBColorSpace) texture.colorSpace = THREE.SRGBColorSpace;
+        skyMesh = new THREE.Mesh(
+          new THREE.SphereGeometry(1, 28, 18),
+          new THREE.MeshBasicMaterial({ map: texture, side: THREE.BackSide, depthWrite: false, fog: false })
+        );
+        skyMesh.frustumCulled = false;
+        skyMesh.renderOrder = -1;
+        scene.add(skyMesh);
+        return skyMesh;
+      }
+
+      function applySky() {
+        const sky = dungeonData && dungeonData.sky;
+        const show = !!(sky && sky.visible && layerHorizon.checked);
+        if (!show) {
+          if (skyMesh) skyMesh.visible = false;
+          scene.fog = null;
+          scene.background = new THREE.Color(0x0a0c10);
+          return;
+        }
+        const mesh = ensureSky();
+        mesh.visible = true;
+        const haze = new THREE.Color(sky.fog || sky.color || '#c5d0d6');
+        scene.background = new THREE.Color('#8ebcd6');
+        scene.fog = new THREE.Fog(haze, 80, 360);
+      }
+
+      function placeSky() {
+        if (!skyMesh || !skyMesh.visible) return;
+        skyMesh.position.copy(camera.position);
+        skyMesh.scale.setScalar(Math.max(80, camera.far * 0.9));
+        if (!scene.fog) return;
+        const dist = Math.max(16, camera.position.distanceTo(controls.target));
+        scene.fog.near = dist * 0.9;
+        scene.fog.far = dist * 1.7 + 180;
+      }
+
+      function standardMaterial(color, options = {}) {
+        return new THREE.MeshStandardMaterial({
+          color,
+          roughness: options.roughness ?? 0.9,
+          metalness: options.metalness ?? 0.02,
+          emissive: 0x000000,
+          side: options.side || THREE.FrontSide,
+          transparent: options.opacity != null && options.opacity < 1,
+          opacity: options.opacity ?? 1,
+          depthWrite: options.depthWrite !== false
+        });
+      }
+
+      function addPolygonFloor(group, polygon, y, color, pick) {
+        if (!polygon || polygon.length < 3) return;
+        const shape = new THREE.Shape();
+        shape.moveTo(polygon[0][0], -polygon[0][1]);
+        for (let i = 1; i < polygon.length; i += 1) shape.lineTo(polygon[i][0], -polygon[i][1]);
+        const geometry = new THREE.ShapeGeometry(shape);
+        geometry.rotateX(-Math.PI / 2);
+        geometry.translate(0, y, 0);
+        const mesh = new THREE.Mesh(geometry, standardMaterial(color, { side: THREE.DoubleSide }));
+        mesh.userData.pick = pick;
+        group.add(mesh);
+      }
+
+      function createLabelSprite(text, color) {
+        const labelCanvas = document.createElement('canvas');
+        labelCanvas.width = 256;
+        labelCanvas.height = 72;
+        const g = labelCanvas.getContext('2d');
+        g.fillStyle = color;
+        if (g.roundRect) {
+          g.beginPath();
+          g.roundRect(4, 4, 248, 64, 32);
+          g.fill();
+        } else {
+          g.fillRect(4, 4, 248, 64);
+        }
+        g.fillStyle = '#0a0c10';
+        // Long names (hub spokes can be 32 characters) shrink to fit the label.
+        let fontSize = 38;
+        g.font = `bold ${fontSize}px Inter, sans-serif`;
+        while (fontSize > 14 && g.measureText(text).width > 224) {
+          fontSize -= 2;
+          g.font = `bold ${fontSize}px Inter, sans-serif`;
+        }
+        g.textAlign = 'center';
+        g.textBaseline = 'middle';
+        g.fillText(text, 128, 38);
+        const texture = new THREE.CanvasTexture(labelCanvas);
+        if (THREE.SRGBColorSpace) texture.colorSpace = THREE.SRGBColorSpace;
+        const sprite = new THREE.Sprite(new THREE.SpriteMaterial({ map: texture, transparent: true, depthTest: false }));
+        sprite.scale.set(9, 2.5, 1);
+        sprite.renderOrder = 10;
+        return sprite;
+      }
+
+      // A light beam and a label above the entrance and exit so they can be found from afar.
+      function addMarkerBeacon(room, marker) {
+        const style = MARKER_STYLES[marker];
+        const b = room.bounds || extractBounds(room);
+        const base = num(room.floorY);
+        const height = num(room.storyHeight, STORY_HEIGHT) + 8;
+        const beam = new THREE.Mesh(
+          new THREE.CylinderGeometry(0.7, 0.7, height, 12, 1, true),
+          new THREE.MeshBasicMaterial({ color: style.hex, transparent: true, opacity: 0.35, depthWrite: false, side: THREE.DoubleSide })
+        );
+        beam.position.set(b.x, base + height / 2, b.z);
+        const label = createLabelSprite(style.label, style.stroke);
+        label.position.set(b.x, base + height + 1.6, b.z);
+        label.userData.pick = { ...room, _kind: 'room' };
+        roomsGroup.add(beam, label);
+      }
+
+      // A stairwell is a ramp from `stair.fromY` at the low door to `stair.toY` at the high door.
+      // Returns false when the room has no usable stair data, so the caller draws a flat floor.
+      function addStairRamp(group, room, color, pick) {
+        const stair = room.stair;
+        if (!stair || !Array.isArray(room.polygon) || room.polygon.length < 3) return false;
+        if (!Array.isArray(stair.low) || !Array.isArray(stair.high)) return false;
+        const axis = stair.axis === 'z' ? 1 : 0;
+        const lowAt = num(stair.low[axis]);
+        const span = num(stair.high[axis]) - lowAt;
+        if (Math.abs(span) < 0.5) return false;
+        const fromY = num(stair.fromY);
+        const toY = num(stair.toY);
+        const xs = room.polygon.map((point) => point[0]);
+        const zs = room.polygon.map((point) => point[1]);
+        const minX = Math.min(...xs);
+        const maxX = Math.max(...xs);
+        const minZ = Math.min(...zs);
+        const maxZ = Math.max(...zs);
+        const heightAt = (x, z) => {
+          const t = Math.min(1, Math.max(0, ((axis === 0 ? x : z) - lowAt) / span));
+          return fromY + t * (toY - fromY) + 0.06;
+        };
+        const corners = [[minX, minZ], [maxX, minZ], [maxX, maxZ], [minX, maxZ]];
+        const geometry = new THREE.BufferGeometry();
+        geometry.setAttribute('position', new THREE.Float32BufferAttribute(
+          corners.flatMap(([x, z]) => [x, heightAt(x, z), z]), 3));
+        geometry.setIndex([0, 1, 2, 0, 2, 3]);
+        geometry.computeVertexNormals();
+        const mesh = new THREE.Mesh(geometry, standardMaterial(color, { side: THREE.DoubleSide }));
+        mesh.userData.pick = pick;
+        group.add(mesh);
+        return true;
+      }
+
+      function addSegmentBox(group, piece, thickness, materialOptions, pick) {
+        const dx = piece.bx - piece.ax;
+        const dz = piece.bz - piece.az;
+        const length = Math.hypot(dx, dz);
+        if (length < 0.15 || piece.height < 0.05) return;
+        const geometry = new THREE.BoxGeometry(length, piece.height, thickness);
+        const mesh = new THREE.Mesh(geometry, standardMaterial(piece.color, materialOptions));
+        mesh.position.set((piece.ax + piece.bx) / 2, piece.y0 + piece.height / 2, (piece.az + piece.bz) / 2);
+        mesh.rotation.y = Math.atan2(-(piece.bz - piece.az), piece.bx - piece.ax);
+        mesh.userData.pick = pick;
+        group.add(mesh);
+      }
+
+      function markerMaterial(color) {
+        return standardMaterial(color, { roughness: 0.45, metalness: 0.05 });
+      }
+
+      // The hub structure: a roof over the room walls, towers, or a fire ring with log seats.
+      // Each roof name is a shape; a roof the viewer does not know leaves the plain walls.
+      function addHubStructure(structure) {
+        const style = structureStyle(structure);
+        const f = structure.footprint;
+        const pick = { ...structure, _kind: 'structure' };
+        const roofMaterial = standardMaterial(style.roofHex, { side: THREE.DoubleSide, roughness: 0.85 });
+        const stoneMaterial = () => markerMaterial(style.hex);
+        const place = (mesh, x, y, z) => {
+          mesh.position.set(x, y, z);
+          mesh.userData.pick = pick;
+          hubGroup.add(mesh);
+          return mesh;
+        };
+        const overhang = 0.7;
+        const top = structure.height;
+
+        if (structure.roof === 'hip') {
+          const rise = Math.max(1.6, Math.min(f.w, f.d) * 0.28);
+          const geometry = new THREE.ConeGeometry(1, rise, 4);
+          geometry.rotateY(Math.PI / 4);
+          const roof = place(new THREE.Mesh(geometry, roofMaterial), f.x, top + rise / 2, f.z);
+          roof.scale.set((f.w + overhang * 2) / Math.SQRT2, 1, (f.d + overhang * 2) / Math.SQRT2);
+        } else if (structure.roof === 'pitched') {
+          const alongX = f.w >= f.d;
+          const across = alongX ? f.d : f.w;
+          const length = (alongX ? f.w : f.d) + overhang * 2;
+          const rise = Math.max(1.5, across * 0.42);
+          const half = across / 2 + overhang;
+          const shape = new THREE.Shape();
+          shape.moveTo(-half, 0);
+          shape.lineTo(half, 0);
+          shape.lineTo(0, rise);
+          shape.closePath();
+          const geometry = new THREE.ExtrudeGeometry(shape, { depth: length, bevelEnabled: false });
+          geometry.translate(0, 0, -length / 2);
+          if (alongX) geometry.rotateY(Math.PI / 2);
+          place(new THREE.Mesh(geometry, roofMaterial), f.x, top, f.z);
+        } else if (structure.roof === 'cone') {
+          const radius = Math.min(f.w, f.d) / 2;
+          place(new THREE.Mesh(new THREE.ConeGeometry(radius, top, 24, 1, true), roofMaterial), f.x, top / 2, f.z);
+          const floor = new THREE.Mesh(new THREE.CircleGeometry(radius, 24), standardMaterial(style.floorHex, { side: THREE.DoubleSide }));
+          floor.rotation.x = -Math.PI / 2;
+          place(floor, f.x, 0.07, f.z);
+          if (structure.door) {
+            // A dark door flap laid on the cloth, on the side the door faces.
+            const half = structure.door.width / 2;
+            const rise = Math.min(structure.door.height, top * 0.7);
+            const baseZ = f.z + Math.sqrt(Math.max(0.1, radius * radius - half * half)) + 0.25;
+            const topZ = f.z + radius * (1 - rise / top) + 0.25;
+            const flap = new THREE.BufferGeometry();
+            flap.setAttribute('position', new THREE.Float32BufferAttribute(
+              [f.x - half, 0.03, baseZ, f.x + half, 0.03, baseZ, f.x, rise, topZ], 3));
+            flap.computeVertexNormals();
+            place(new THREE.Mesh(flap, standardMaterial(0x1c1917, { side: THREE.DoubleSide })), 0, 0, 0);
+          }
+        } else if (structure.roof === 'battlements') {
+          const merlon = new THREE.BoxGeometry(1, 0.9, 1);
+          const step = 1.9;
+          const addRow = (x0, z0, x1, z1) => {
+            const length = Math.hypot(x1 - x0, z1 - z0);
+            const count = Math.max(1, Math.floor(length / step));
+            for (let i = 0; i < count; i += 1) {
+              const t = (i + 0.5) / count;
+              place(new THREE.Mesh(merlon, stoneMaterial()), x0 + (x1 - x0) * t, top + 0.45, z0 + (z1 - z0) * t);
+            }
+          };
+          const tower = structure.parts.find((part) => part.type === 'tower');
+          const clear = tower ? tower.radius : 0;
+          addRow(f.minX + clear, f.minZ + 0.5, f.maxX - clear, f.minZ + 0.5);
+          addRow(f.minX + clear, f.maxZ - 0.5, f.maxX - clear, f.maxZ - 0.5);
+          addRow(f.minX + 0.5, f.minZ + clear, f.minX + 0.5, f.maxZ - clear);
+          addRow(f.maxX - 0.5, f.minZ + clear, f.maxX - 0.5, f.maxZ - clear);
+        }
+
+        structure.parts.forEach((part) => {
+          if (part.type === 'tower') {
+            const height = Math.max(4, part.height);
+            place(new THREE.Mesh(new THREE.CylinderGeometry(part.radius, part.radius * 1.06, height, 18), stoneMaterial()), part.x, height / 2, part.z);
+            const merlon = new THREE.BoxGeometry(0.9, 0.9, 0.9);
+            for (let i = 0; i < 10; i += 1) {
+              const angle = (i / 10) * Math.PI * 2;
+              const mesh = place(new THREE.Mesh(merlon, stoneMaterial()), part.x + Math.cos(angle) * (part.radius - 0.45), height + 0.45, part.z + Math.sin(angle) * (part.radius - 0.45));
+              mesh.rotation.y = -angle;
+            }
+          } else if (part.type === 'fire-pit') {
+            const stone = new THREE.DodecahedronGeometry(0.3, 0);
+            for (let i = 0; i < 9; i += 1) {
+              const angle = (i / 9) * Math.PI * 2;
+              place(new THREE.Mesh(stone, markerMaterial(0x78716c)), part.x + Math.cos(angle) * part.radius, 0.2, part.z + Math.sin(angle) * part.radius);
+            }
+            const flameColor = hexColor(part.light && part.light.color, 0xff7a18);
+            const flameMaterial = markerMaterial(0xfb923c);
+            flameMaterial.emissive.set(flameColor);
+            flameMaterial.emissiveIntensity = 0.9;
+            const flame = place(new THREE.Mesh(new THREE.ConeGeometry(0.55, 1.4, 8), flameMaterial), part.x, 0.75, part.z);
+            flame.userData.restEmissive = flameColor;
+            flame.userData.pick = { ...part, _kind: 'fire', name: 'Fire' };
+            const glow = new THREE.PointLight(
+              flameColor,
+              num(part.light && part.light.intensity, 2.5),
+              num(part.light && part.light.distance, 8)
+            );
+            glow.position.set(part.x, 1.4, part.z);
+            hubGroup.add(glow);
+          } else if (part.type === 'log-seat') {
+            const geometry = new THREE.CylinderGeometry(0.3, 0.3, Math.max(0.8, part.length), 8);
+            geometry.rotateX(Math.PI / 2);
+            const log = place(new THREE.Mesh(geometry, markerMaterial(style.hex)), part.x, 0.3, part.z);
+            log.rotation.y = part.rotationY;
+          }
+        });
+      }
+
+      function rebuild() {
+        clearContent();
+        if (!dungeonData) return;
+        const rooms = dungeonData.rooms || [];
+        const doors = dungeonData.doors || [];
+        const hubStructure = dungeonData.hub ? dungeonData.hub.structure : null;
+        const hubStyle = hubStructure ? structureStyle(hubStructure) : null;
+        // A tent's canvas cone is its shell, so it gets no box walls and a round groundsheet.
+        const roundStructure = !!hubStructure && hubStructure.roof === 'cone';
+
+        (dungeonData.outdoor || []).forEach((area) => {
+          let color = 0x3c3428;
+          if (area.role === 'path' || area.role === 'court') color = 0x6b5336;
+          else if (area.role === 'spoke') color = 0x7a6240;
+          else if (area.role === 'hub-plaza') color = 0x5d5240;
+          else if (area.role === 'hub') color = 0x4d5840;
+          else if (area.role === 'vista') color = 0x6a5438;
+          else if (area.role === 'vestibule') color = 0x5c5144;
+          const y = area.role === 'exterior' ? 0 : (area.role === 'vista' ? 0.02 : (area.role === 'spoke' ? 0.05 : 0.03));
+          addPolygonFloor(outdoorGroup, area.polygon, y, color, { ...area, _kind: 'outdoor' });
+        });
+
+        // Each spoke ends in a light beam and its name, so the connection points can be found.
+        ((dungeonData.hub && dungeonData.hub.spokes) || []).forEach((spoke) => {
+          const pick = { ...spoke.area, _kind: 'outdoor' };
+          const beam = new THREE.Mesh(
+            new THREE.CylinderGeometry(0.4, 0.4, 7, 10, 1, true),
+            new THREE.MeshBasicMaterial({ color: 0xfbbf24, transparent: true, opacity: 0.35, depthWrite: false, side: THREE.DoubleSide })
+          );
+          beam.position.set(spoke.end.x, 3.5, spoke.end.z);
+          beam.userData.pick = pick;
+          const label = createLabelSprite(spoke.name, '#fbbf24');
+          label.position.set(spoke.end.x, 8.4, spoke.end.z);
+          label.userData.pick = pick;
+          outdoorGroup.add(beam, label);
+        });
+
+        rooms.forEach((room) => {
+          const marker = roomMarker(room);
+          let color = room.kind === 'corridor' ? 0x242b38 : (room.tier === 'boss_arena' ? 0x3a2228 : 0x31384a);
+          if (marker) color = MARKER_STYLES[marker].floor;
+          if (hubStyle) color = hubStyle.floorHex;
+          const pick = { ...room, _kind: 'room' };
+          if (roundStructure) return;
+          if (!addStairRamp(roomsGroup, room, 0x4b5563, pick)) {
+            addPolygonFloor(roomsGroup, room.polygon, num(room.floorY) + 0.06, color, pick);
+          }
+          if (marker) addMarkerBeacon(room, marker);
+        });
+
+        if (hubStructure) addHubStructure(hubStructure);
+
+        const wallPieces = buildWallPieces(roundStructure ? [] : rooms, doors);
+        if (hubStyle) wallPieces.forEach((piece) => { if (!piece.opening) piece.color = hubStyle.hex; });
+        wallPieces.forEach((piece) => {
+          if (piece.opening) {
+            addSegmentBox(doorsGroup, piece, 0.28, { opacity: 0.22, depthWrite: false, roughness: 0.3 }, piece.door ? { ...piece.door, _kind: 'door' } : null);
+            return;
+          }
+          if (piece.door) {
+            addSegmentBox(doorsGroup, piece, WALL_THICKNESS, {}, { ...piece.door, _kind: 'door' });
+            return;
+          }
+          addSegmentBox(roomsGroup, piece, WALL_THICKNESS, {}, piece.room ? { ...piece.room, _kind: 'room' } : null);
+        });
+
+        // The exit arch stands in the open, so it has no room wall to cut a gap in.
+        (dungeonData.doors || []).forEach((door) => {
+          if (door.id !== 'exit-arch' || !Array.isArray(door.a) || !Array.isArray(door.b)) return;
+          const ax = door.a[0];
+          const az = door.a[1];
+          const bx = door.b[0];
+          const bz = door.b[1];
+          const dx = bx - ax;
+          const dz = bz - az;
+          const length = Math.hypot(dx, dz);
+          if (length < 0.5) return;
+          const height = Math.max(4, num(door.height, 7));
+          const post = 0.85;
+          const pick = { ...door, _kind: 'door' };
+          const ux = dx / length;
+          const uz = dz / length;
+          [ [ax - ux * post * 0.2, az - uz * post * 0.2], [bx + ux * post * 0.2, bz + uz * post * 0.2] ].forEach(([x, z]) => {
+            const pillar = new THREE.Mesh(new THREE.BoxGeometry(post, height, post), markerMaterial(0x9ca3af));
+            pillar.position.set(x, height / 2, z);
+            pillar.userData.pick = pick;
+            doorsGroup.add(pillar);
+          });
+          const lintel = new THREE.Mesh(new THREE.BoxGeometry(length + post, 0.9, post), markerMaterial(0x9ca3af));
+          lintel.position.set((ax + bx) / 2, height - 0.45, (az + bz) / 2);
+          lintel.rotation.y = Math.atan2(-(bz - az), bx - ax);
+          lintel.userData.pick = pick;
+          doorsGroup.add(lintel);
+        });
+
+        (dungeonData.distance || []).forEach((mountain) => {
+          const height = Math.max(8, num(mountain.height, 40));
+          const radius = Math.max(6, num(mountain.radius, 20));
+          const shade = 0.45 + Math.max(0, Math.min(1, num(mountain.depth, 0.7))) * 0.55;
+          const color = new THREE.Color(0x94a3b8).multiplyScalar(shade);
+          const mesh = new THREE.Mesh(new THREE.ConeGeometry(radius, height, 6), markerMaterial(color));
+          mesh.position.set(mountain.x, height / 2, mountain.z);
+          mesh.rotation.y = num(mountain.yaw);
+          mesh.scale.z = 0.72;
+          mesh.userData.pick = { ...mountain, _kind: 'mountain' };
+          farGroup.add(mesh);
+        });
+
+        (dungeonData.torches || []).forEach((torch) => {
+          const nx = num(torch.nx, 0);
+          const nz = num(torch.nz, 0);
+          const normal = new THREE.Vector3(nx, 0, nz);
+          if (normal.lengthSq() < 1e-4) normal.set(0, 0, 1);
+          normal.normalize();
+          const flameColor = hexColor(torch.light && torch.light.color, 0xff7a18);
+          const mat = markerMaterial(0xfb923c);
+          mat.emissive.set(flameColor);
+          mat.emissiveIntensity = 0.85;
+          const bulb = new THREE.Mesh(new THREE.SphereGeometry(0.16, 12, 8), mat);
+          bulb.position.set(torch.x + normal.x * 0.18, torch.y || 1.7, torch.z + normal.z * 0.18);
+          bulb.userData.pick = { ...torch, _kind: 'torch' };
+          bulb.userData.restEmissive = flameColor;
+          if (torch.light) {
+            const glow = new THREE.PointLight(
+              flameColor,
+              num(torch.light.intensity, 2.5),
+              num(torch.light.distance, 8)
+            );
+            glow.position.copy(bulb.position);
+            torchesGroup.add(glow);
+          }
+          const peg = new THREE.Mesh(new THREE.CylinderGeometry(0.045, 0.045, 0.42, 6), markerMaterial(0x94a3b8));
+          peg.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), normal);
+          peg.position.copy(bulb.position).addScaledVector(normal, -0.12);
+          peg.userData.pick = bulb.userData.pick;
+          torchesGroup.add(bulb, peg);
+        });
+
+        (dungeonData.chests || []).forEach((chest) => {
+          const mesh = new THREE.Mesh(new THREE.BoxGeometry(0.85, 0.48, 0.52), markerMaterial(chest.lootTier === 'boss_master' ? 0xf59e0b : 0xb45309));
+          mesh.position.set(chest.x, num(chest.y) + 0.3, chest.z);
+          mesh.userData.pick = { ...chest, _kind: 'chest' };
+          chestsGroup.add(mesh);
+        });
+
+        (dungeonData.enemies || []).forEach((enemy) => {
+          const mesh = new THREE.Mesh(
+            new THREE.ConeGeometry(enemy.isBoss ? 0.55 : 0.28, enemy.isBoss ? 1.5 : 0.85, 8),
+            markerMaterial(enemy.isBoss ? 0xdc2626 : 0xb91c1c)
+          );
+          mesh.position.set(enemy.x, num(enemy.y) + (enemy.isBoss ? 0.75 : 0.42), enemy.z);
+          mesh.userData.pick = { ...enemy, _kind: 'enemy' };
+          enemiesGroup.add(mesh);
+        });
+
+        (dungeonData.decor || []).forEach((item) => {
+          if (item.type !== 'dead_tree') return;
+          const scale = num(item.scale, 1);
+          const height = Math.max(2.2, num(item.height, 5) * scale);
+          const tree = new THREE.Group();
+          const trunk = new THREE.Mesh(new THREE.CylinderGeometry(0.1 * scale, 0.16 * scale, height * 0.42, 6), markerMaterial(0x6b3f24));
+          trunk.position.y = height * 0.21;
+          const crown = new THREE.Mesh(new THREE.ConeGeometry(0.55 * scale, height * 0.62, 7), markerMaterial(0x57534e));
+          crown.position.y = height * 0.58;
+          tree.add(trunk, crown);
+          tree.position.set(item.x, 0, item.z);
+          const pick = { ...item, _kind: 'decor' };
+          trunk.userData.pick = pick;
+          crown.userData.pick = pick;
+          decorGroup.add(tree);
+        });
+
+        [[dungeonData.props, 'prop'], [dungeonData.scenery, 'scenery']].forEach(([list, kind]) => {
+          (Array.isArray(list) ? list : []).forEach((item) => {
+            const style = propStyle(item.type);
+            const scale = num(item.scale, 1);
+            const w = style.w * scale;
+            const h = style.h * scale;
+            const d = (style.d ?? style.w) * scale;
+            let geometry;
+            if (style.shape === 'box') geometry = new THREE.BoxGeometry(w, h, d);
+            else if (style.shape === 'cyl') geometry = new THREE.CylinderGeometry(w * 0.45, w * 0.5, h, 10);
+            else if (style.shape === 'cone') geometry = new THREE.ConeGeometry(w * 0.5, h, 7);
+            else geometry = new THREE.DodecahedronGeometry(Math.max(w, d) * 0.5, 0);
+            const mesh = new THREE.Mesh(geometry, markerMaterial(style.color));
+            if (style.shape === 'rock') mesh.scale.y = h / Math.max(w, d);
+            mesh.position.set(item.x, num(item.y) + h / 2, item.z);
+            mesh.rotation.y = num(item.rotationY);
+            mesh.userData.pick = { ...item, _kind: kind };
+            propsGroup.add(mesh);
+          });
+        });
+
+        if (dungeonData.playerStart) {
+          const start = dungeonData.playerStart;
+          const yaw = num(start.facingYaw);
+          const direction = new THREE.Vector3(-Math.sin(yaw), 0, -Math.cos(yaw));
+          if (direction.lengthSq() < 1e-6) direction.set(0, 0, -1);
+          const arrow = new THREE.ArrowHelper(direction.normalize(), new THREE.Vector3(start.x, 0.25, start.z), 3.2, 0x34d399, 1.05, 0.55);
+          const pick = { ...start, _kind: 'playerStart', name: start.locationName || start.name || 'Player Start' };
+          arrow.line.userData.pick = pick;
+          arrow.cone.userData.pick = pick;
+          playerGroup.add(arrow);
+          if (start.respawn) {
+            // The hub's spawn and respawn point gets a beacon like the ruin's entrance.
+            const beam = new THREE.Mesh(
+              new THREE.CylinderGeometry(0.6, 0.6, 9, 12, 1, true),
+              new THREE.MeshBasicMaterial({ color: 0x38bdf8, transparent: true, opacity: 0.35, depthWrite: false, side: THREE.DoubleSide })
+            );
+            beam.position.set(start.x, 4.5, start.z);
+            beam.userData.pick = pick;
+            const label = createLabelSprite('RESPAWN', '#38bdf8');
+            label.position.set(start.x, 10.6, start.z);
+            label.userData.pick = pick;
+            playerGroup.add(beam, label);
+          }
+        }
+
+        (dungeonData.transitions || []).forEach((transition) => {
+          if (transition.arrival) {
+            const ring = new THREE.Mesh(new THREE.CylinderGeometry(0.9, 0.9, 0.12, 20), standardMaterial(0x38bdf8, { opacity: 0.45, depthWrite: false }));
+            ring.position.set(transition.arrival.x, num(transition.y) + 0.1, transition.arrival.z);
+            ring.userData.pick = { ...transition, _kind: 'transition' };
+            transitionsGroup.add(ring);
+            return;
+          }
+          const box = transition.triggerBox || extractBounds(transition);
+          const width = Math.max(0.4, box.w || 2);
+          const depth = Math.max(0.4, box.d || 2);
+          const geometry = new THREE.BoxGeometry(width, 2.2, depth);
+          const volume = new THREE.Mesh(geometry, standardMaterial(0x38bdf8, { opacity: 0.16, depthWrite: false }));
+          volume.position.set(box.x || 0, num(transition.y) + 1.1, box.z || 0);
+          const edges = new THREE.LineSegments(new THREE.EdgesGeometry(geometry), new THREE.LineBasicMaterial({ color: 0x7dd3fc }));
+          edges.position.copy(volume.position);
+          const pick = { ...transition, _kind: 'transition' };
+          volume.userData.pick = pick;
+          edges.userData.pick = pick;
+          transitionsGroup.add(volume, edges);
+        });
+
+        const bounds = new THREE.Box3().setFromObject(content);
+        if (!bounds.isEmpty()) {
+          const size = bounds.getSize(new THREE.Vector3());
+          const center = bounds.getCenter(new THREE.Vector3());
+          const span = Math.max(20, Math.ceil(Math.max(size.x, size.z) / 10) * 10);
+          const grid = new THREE.GridHelper(span, Math.min(80, span), 0x475569, 0x1e293b);
+          grid.position.set(center.x, 0.01, center.z);
+          gridGroup.add(grid);
+        }
+        applyLayers();
+        syncSelection();
+      }
+
+      function applyLayers() {
+        roomsGroup.visible = layerRooms.checked;
+        hubGroup.visible = layerRooms.checked;
+        outdoorGroup.visible = layerTrail.checked;
+        farGroup.visible = layerHorizon.checked;
+        decorGroup.visible = layerTrail.checked;
+        doorsGroup.visible = layerDoors.checked;
+        torchesGroup.visible = layerTorches.checked;
+        chestsGroup.visible = layerChests.checked;
+        enemiesGroup.visible = layerEnemies.checked;
+        propsGroup.visible = layerProps.checked;
+        transitionsGroup.visible = layerSpawns.checked;
+        playerGroup.visible = layerSpawns.checked;
+        gridGroup.visible = layerGrid.checked;
+        applySky();
+      }
+
+      function resize() {
+        const rect = container.getBoundingClientRect();
+        const width = Math.max(1, rect.width);
+        const height = Math.max(1, rect.height);
+        renderer.setSize(width, height, false);
+        camera.aspect = width / height;
+        camera.updateProjectionMatrix();
+      }
+
+      function frameBox(box, padding) {
+        if (!box || box.isEmpty()) return;
+        const center = box.getCenter(new THREE.Vector3());
+        const size = box.getSize(new THREE.Vector3());
+        const radius = Math.max(size.x, size.y, size.z) * 0.5;
+        const distance = Math.max(8, (radius / Math.sin((camera.fov * Math.PI) / 360)) * (padding || 0.72));
+        controls.target.copy(center);
+        camera.position.set(center.x + distance * 0.42, Math.max(center.y + 2, distance * 0.58), center.z + distance * 0.7);
+        camera.near = Math.max(0.05, distance / 400);
+        camera.far = Math.max(200, distance * 12);
+        camera.updateProjectionMatrix();
+        controls.update();
+      }
+
+      function fit() {
+        const box = new THREE.Box3().setFromObject(content);
+        frameBox(box, 0.78);
+      }
+
+      function focus(x, y, z) {
+        const bounds = selectedEntity?.bounds;
+        const base = num(y);
+        const span = Math.max(8, bounds?.w || 0, bounds?.d || 0);
+        const distance = span * 1.65;
+        controls.target.set(x, base + 1.4, z);
+        camera.position.set(x + distance * 0.72, base + distance * 0.78, z + distance);
+        camera.near = Math.max(0.05, distance / 300);
+        camera.far = Math.max(400, distance * 30);
+        camera.updateProjectionMatrix();
+        controls.update();
+      }
+
+      function dolly(scale) {
+        const offset = camera.position.clone().sub(controls.target);
+        const next = offset.length() * scale;
+        if (next < 2.5 || next > 900) return;
+        offset.multiplyScalar(scale);
+        camera.position.copy(controls.target).add(offset);
+        controls.update();
+      }
+
+      function syncSelection() {
+        content.traverse((node) => {
+          if (!node.isMesh || !node.material || !node.material.emissive) return;
+          const pick = node.userData.pick;
+          const active = selectedEntity && pick && pick.id === selectedEntity.id && pick._kind === selectedEntity._kind;
+          node.material.emissive.set(active ? 0xf59e0b : (node.userData.restEmissive || 0x000000));
+          node.material.emissiveIntensity = active ? 0.65 : (node.userData.restEmissive ? 0.85 : 0);
+        });
+      }
+
+      function tick() {
+        if (!running) return;
+        raf = requestAnimationFrame(tick);
+        controls.update();
+        placeSky();
+        renderer.render(scene, camera);
+      }
+
+      function start() {
+        if (running) return;
+        running = true;
+        tick();
+      }
+
+      function stop() {
+        running = false;
+        if (raf) cancelAnimationFrame(raf);
+        raf = 0;
+      }
+
+      targetCanvas.addEventListener('pointerdown', (event) => {
+        if (event.button !== 0) return;
+        pointerDown = { x: event.clientX, y: event.clientY };
+      });
+      targetCanvas.addEventListener('pointerup', (event) => {
+        if (!pointerDown || event.button !== 0) return;
+        const moved = Math.hypot(event.clientX - pointerDown.x, event.clientY - pointerDown.y);
+        pointerDown = null;
+        if (moved > 5) return;
+        const rect = targetCanvas.getBoundingClientRect();
+        if (!rect.width || !rect.height) return;
+        pointer.x = ((event.clientX - rect.left) / rect.width) * 2 - 1;
+        pointer.y = -((event.clientY - rect.top) / rect.height) * 2 + 1;
+        raycaster.setFromCamera(pointer, camera);
+        const roots = farGroup.visible ? content.children.concat(farGroup) : content.children;
+        const hits = raycaster.intersectObjects(roots, true);
+        const hit = hits.find((item) => item.object.userData && item.object.userData.pick);
+        selectEntity(hit ? itemPick(hit.object.userData.pick) : null);
+      });
+
+      function itemPick(pick) {
+        return pick;
+      }
+
+      return { rebuild, applyLayers, resize, fit, focus, dolly, syncSelection, start, stop };
+    }
+
+    function setViewButtons() {
+      const planOn = viewMode === 'plan';
+      btnViewPlan.className = planOn
+        ? 'px-2.5 py-1.5 text-xs font-medium bg-amber-500/20 text-amber-200'
+        : 'px-2.5 py-1.5 text-xs font-medium text-slate-300 hover:bg-dungeon-800';
+      btnView3d.className = planOn
+        ? 'px-2.5 py-1.5 text-xs font-medium text-slate-300 hover:bg-dungeon-800'
+        : 'px-2.5 py-1.5 text-xs font-medium bg-amber-500/20 text-amber-200';
+    }
+
+    function showPlan() {
+      viewMode = 'plan';
+      canvas.classList.remove('hidden');
+      view3dCanvas.classList.add('hidden');
+      view3dFallback.classList.add('hidden');
+      controlsHint.textContent = 'Drag: Pan | Scroll: Zoom | Click: Inspect';
+      if (view3d) view3d.stop();
+      setViewButtons();
+      resizeCanvas();
+    }
+
+    async function show3d() {
+      viewMode = '3d';
+      setViewButtons();
+      controlsHint.textContent = 'Drag: Orbit | Right-drag: Pan | Scroll: Zoom | Click: Inspect';
+      canvas.classList.add('hidden');
+      try {
+        if (!view3d) view3d = await createView3D(view3dCanvas);
+        view3dFallback.classList.add('hidden');
+        view3dCanvas.classList.remove('hidden');
+        view3d.resize();
+        view3d.rebuild();
+        view3d.fit();
+        view3d.start();
+      } catch (err) {
+        view3dCanvas.classList.add('hidden');
+        view3dFallback.classList.remove('hidden');
+        view3dFallbackText.textContent = `Three.js did not load (${err.message}). Open this page through a local web server if the address starts with file://. The plan view still works.`;
+      }
+    }
+
+    btnViewPlan.addEventListener('click', showPlan);
+    btnView3d.addEventListener('click', show3d);
+    document.getElementById('btnFallbackPlan').addEventListener('click', showPlan);
+
+    window.addEventListener('resize', resizeCanvas);
+
+    window.onload = () => {
+      resizeCanvas();
+      applyNewDungeonData(SAMPLE_ANCIENT_RUINS_DATA);
+    };
+  </script>
+</body>
+</html>

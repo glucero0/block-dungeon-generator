@@ -1,0 +1,49 @@
+---
+description: Keep README.md, .gitignore, tests, and other project files current whenever code or tooling changes
+alwaysApply: true
+---
+
+# Keep project files current
+
+When a change affects how the project is used, built, or tested, update the files that
+describe or support it in the same change. Do not leave them for later.
+
+## README.md
+
+Update it when a feature is added, removed, or meaningfully changed. That includes:
+
+- CLI flags and defaults (`--seed`, `--floors`, `--chambers`, `--density`, `--clutter`).
+- JSON fields consumers rely on, such as `spawns`, `props`, `scenery`, and `options`.
+- How to run, test, or view a layout (the "Run", "View a layout", and "Test" sections).
+- The "same seed gives the same file" promise. Say what else must match, such as the options.
+
+Write plain, factual prose. Match the existing sections rather than adding new ones
+for small changes.
+
+## .gitignore
+
+Update it when a change creates files that should not be committed:
+
+- Generated output (`out/`), caches, build artifacts, virtual environments, coverage data.
+- Anything holding secrets or local settings (`.env*`, `*.local`).
+- New tooling's folders. Do not ignore `.cursor/rules/`, since the rules are shared.
+
+Check `git status` after adding tooling or generating files. Untracked clutter means
+`.gitignore` needs an entry.
+
+## Tests
+
+- Add or update tests in `tests/` for every generator change. Cover the new behavior
+  and its limits, such as invalid options, determinism, and placement rules.
+- Run `python -m unittest discover -s tests -v` and fix failures before finishing.
+
+## Dependencies and security
+
+- The generator uses only the Python standard library. If a dependency is added, list it
+  in the README and a requirements file, and pin versions so Dependabot can track them.
+- Treat the viewer's and CLI's inputs as untrusted: validate ranges and types, and avoid
+  `eval`, `exec`, `pickle`, `shell=True`, and `innerHTML` with file data, so CodeQL stays clean.
+
+## Related
+
+- The viewer has its own rule: `keep-visualizer-in-sync.mdc`.

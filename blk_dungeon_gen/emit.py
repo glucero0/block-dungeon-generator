@@ -2,9 +2,17 @@
 
 import math
 
-from .approach import build_approach
+from .approach import build_approach, entrance_door_width
 from .assemble import assemble
 from .blocks import STORY, polygon_of
+from .density import DENSITY, depth_fractions, spawn_count
+from .fire import flame
+from .exits import build_exit
+from .props import place_props
+from .seeding import sub_rng
+from .spatial import candidates as _candidates
+from .spatial import clearance as _clearance
+from .spatial import door_distance as _door_distance
 
 NAMES = {
     'stone': ['Stone Gate', 'Stone Cells', 'Mason Hall', 'Stone Vault', 'Old Watch', 'Gallery of Blocks'],
@@ -35,43 +43,6 @@ def _name_for(theme, used, rng):
     name = f'{pool[len(used) % len(pool)]} {len(used)}'
     used.add(name)
     return name
-
-
-def _clearance(x, z, rect):
-    inside = rect.x <= x <= rect.x + rect.w and rect.z <= z <= rect.z + rect.d
-    dx = min(x - rect.x, rect.x + rect.w - x)
-    dz = min(z - rect.z, rect.z + rect.d - z)
-    dist = min(dx, dz)
-    return dist if inside else -dist
-
-
-def _closest(px, pz, ax, az, bx, bz):
-    abx = bx - ax
-    abz = bz - az
-    len2 = abx * abx + abz * abz
-    t = 0 if len2 <= 0 else ((px - ax) * abx + (pz - az) * abz) / len2
-    t = max(0.0, min(1.0, t))
-    return ax + abx * t, az + abz * t
-
-
-def _door_distance(x, z, doors):
-    best = math.inf
-    for door in doors:
-        cx, cz = _closest(x, z, door['a'][0], door['a'][1], door['b'][0], door['b'][1])
-        best = min(best, math.hypot(x - cx, z - cz))
-    return best
-
-
-def _candidates(rect, step):
-    points = []
-    x = rect.x + 1.6
-    while x <= rect.x + rect.w - 1.6 + 1e-6:
-        z = rect.z + 1.6
-        while z <= rect.z + rect.d - 1.6 + 1e-6:
-            points.append((x, z))
-            z += step
-        x += step
-    return points
 
 
 def _door_record(link, rng):
@@ -147,23 +118,6 @@ def _stair_field(block, links):
     return {'axis': axis, 'fromY': _round(lower.y), 'toY': _round(upper.y), 'low': low, 'high': high}
 
 
-def _wanted_spawns(block):
-    if block.block in ('entrance', 'stairwell', 'doorway'):
-        return 0
-    area = block.rect.w * block.rect.d
-    if block.kind == 'chamber':
-        if area < 420:
-            return 2
-        if area < 780:
-            return 3
-        if area < 1200:
-            return 4
-        return 5
-    if block.run >= 16 and area >= 90:
-        return 2 if area > 180 else 1
-    return 0
-
-
 def _place_spawns(block, doors, rng, wanted):
     if wanted <= 0:
         return []
@@ -199,7 +153,9 @@ def _sconce(block, doors, rng):
         if score > best_score:
             best_score = score
             best = option
-    return {'x': _round(best[0]), 'z': _round(best[1]), 'nx': best[2], 'nz': best[3]}
+    record = {'x': _round(best[0]), 'z': _round(best[1]), 'nx': best[2], 'nz': best[3]}
+    record.update(flame())
+    return record
 
 
 def _chest(block, sconce, doors, spawns):
@@ -279,8 +235,30 @@ def _themes(blocks, rng):
     return {id(block): deck[index] for index, block in enumerate(fought)}
 
 
-def emit(layout, rng, seed, floors):
+def _prop_doors(block, linked):
+    """Openings props must stay clear of. The antechamber also has the outside arch."""
+    doors = list(linked)
+    if block.block == 'entrance':
+        mid = block.rect.x + block.rect.w / 2
+        half = entrance_door_width(block.rect) / 2
+        south = block.rect.z + block.rect.d
+        doors.append({'a': [mid - half, south], 'b': [mid + half, south]})
+    return doors
+
+
+def _avoid_points(spawns, rocks, chest, sconce):
+    avoid = [(x, z, 2.0) for x, z in spawns]
+    avoid.extend((x, z, 2.0) for x, z in rocks)
+    if chest:
+        avoid.append((chest['x'], chest['z'], 2.2))
+    if sconce:
+        avoid.append((sconce['x'], sconce['z'], 2.0))
+    return avoid
+
+
+def emit(layout, rng, seed, floors, density='normal', clutter=0.5):
     themes = _themes(layout.blocks, rng)
+    depths = depth_fractions(layout)
     used_names = {'Antechamber'}
     for index, block in enumerate(layout.blocks):
         block.index = index
@@ -303,7 +281,8 @@ def emit(layout, rng, seed, floors):
         else:
             name = _name_for(theme, used_names, rng)
         linked = [door for door in doors if door['from'] == block.id or door['to'] == block.id]
-        spawns = _place_spawns(block, linked, rng, _wanted_spawns(block))
+        wanted = spawn_count(block, density, depths.get(id(block), 0.0))
+        spawns = _place_spawns(block, linked, sub_rng(seed, 'spawns', block.index), wanted)
         room = {
             'id': block.id,
             'index': block.index,
@@ -323,6 +302,7 @@ def emit(layout, rng, seed, floors):
             'brazier': None,
             'sconce': None,
             'rocks': [],
+            'props': [],
             'lighting': 'underground',
             'floor': block.floor,
             'y': _round(block.floor * STORY),
@@ -338,21 +318,33 @@ def emit(layout, rng, seed, floors):
         elif block.block == 'exit':
             room['description'] = EXIT_DESCRIPTION
         if theme == 'cave':
-            room['rocks'] = _rocks(block, linked, spawns, rng)
+            room['rocks'] = _rocks(block, linked, spawns, sub_rng(seed, 'rocks', block.index))
         if block.kind == 'chamber' and spawns and block.block not in ('entrance', 'exit'):
-            anchor = _sconce(block, linked, rng)
+            anchor = _sconce(block, linked, sub_rng(seed, 'sconce', block.index))
             room['sconce'] = anchor
             room['chest'] = _chest(block, anchor, linked, spawns)
+        if block.kind == 'chamber':
+            room['props'] = place_props(
+                block,
+                theme,
+                _prop_doors(block, linked),
+                _avoid_points(spawns, room['rocks'], room['chest'], room['sconce']),
+                sub_rng(seed, 'props', block.index),
+                clutter,
+            )
         rooms.append(room)
         by_id[block.id] = room
 
     ante = layout.blocks[0].rect
-    outdoors = build_approach(ante, rng)
+    outdoors = build_approach(ante, sub_rng(seed, 'approach'), clutter)
     exit_block = next(block for block in layout.blocks if block.block == 'exit')
+    exit_gate, exit_area, exit_labels, exit_transitions = build_exit(
+        layout, exit_block, sub_rng(seed, 'exit'), clutter, outdoors['transitions'])
     area = sum(block.rect.w * block.rect.d for block in layout.blocks)
     return {
         'seed': int(seed) & 0xFFFFFFFF,
         'floors': floors,
+        'options': {'density': density, 'clutter': round(float(clutter), 3)},
         'area': area,
         'rooms': rooms,
         'doors': doors,
@@ -365,18 +357,23 @@ def emit(layout, rng, seed, floors):
         'exterior': outdoors['exterior'],
         'hub': outdoors['hub'],
         'trees': outdoors['trees'],
-        'zoneLabels': outdoors['zoneLabels'],
+        'scenery': outdoors['scenery'],
+        'zoneLabels': {**outdoors['zoneLabels'], **exit_labels},
         'approach': outdoors['approach'],
-        'transitions': outdoors['transitions'],
+        'transitions': outdoors['transitions'] + exit_transitions,
         'gateInward': outdoors['gateInward'],
+        'exitGate': exit_gate,
+        'exitArea': exit_area,
     }
 
 
-def generate_layout(seed=1, floors=2, chambers=8):
+def generate_layout(seed=1, floors=2, chambers=8, density='normal', clutter=0.5):
     """Build a full Ancient Ruins document.
 
     `chambers` counts the entrance, the exit, T hubs, and other rooms.
     Stairwells, hallways, and doorways are extra structure and are not counted.
+    `density` is 'low', 'normal', or 'high' and scales enemy spawns.
+    `clutter` is 0 to 1 and scales room props and outdoor scenery.
     """
     if not isinstance(seed, int) or isinstance(seed, bool):
         raise TypeError('seed must be an int')
@@ -384,5 +381,11 @@ def generate_layout(seed=1, floors=2, chambers=8):
         raise ValueError('floors must be from 1 to 8')
     if chambers < 2 or chambers > 30:
         raise ValueError('chambers must be from 2 to 30')
+    if density not in DENSITY:
+        raise ValueError('density must be one of: ' + ', '.join(DENSITY))
+    if isinstance(clutter, bool) or not isinstance(clutter, (int, float)):
+        raise TypeError('clutter must be a number')
+    if not math.isfinite(clutter) or clutter < 0 or clutter > 1:
+        raise ValueError('clutter must be from 0 to 1')
     layout, rng = assemble(seed, floors, chambers)
-    return emit(layout, rng, seed, floors)
+    return emit(layout, rng, seed, floors, density, clutter)

@@ -1,0 +1,752 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Equipment</title>
+  <script type="importmap">
+  {
+    "imports": {
+      "three": "https://unpkg.com/three@0.170.0/build/three.module.js",
+      "three/addons/": "https://unpkg.com/three@0.170.0/examples/jsm/"
+    }
+  }
+  </script>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Cinzel:wght@600;700&family=JetBrains+Mono:wght@400;500&family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
+  <script>
+    tailwind.config = {
+      theme: {
+        extend: {
+          fontFamily: {
+            title: ['Cinzel', 'serif'],
+            mono: ['"JetBrains Mono"', 'monospace'],
+            sans: ['Inter', 'sans-serif'],
+          },
+          colors: {
+            dungeon: { 950: '#0a0c10', 900: '#11151c', 800: '#1f2633', 700: '#2e384d', accent: '#d4af37', torch: '#f97316' }
+          }
+        }
+      }
+    }
+  </script>
+  <style>
+    html, body { height: 100%; margin: 0; background: #0a0c10; color: #e2e8f0; }
+    body { display: flex; flex-direction: column; font-family: Inter, sans-serif; user-select: none; }
+    header { display: flex; align-items: center; gap: 0.75rem; padding: 0.7rem 1rem; border-bottom: 1px solid #2e384d; }
+    h1 { font-family: Cinzel, serif; color: #d4af37; font-size: 1.15rem; margin: 0; }
+    button, .file-label { font: 500 0.8rem/1 Inter, sans-serif; color: #e2e8f0; background: #1f2633; border: 1px solid #2e384d; border-radius: 0.35rem; padding: 0.35rem 0.7rem; cursor: pointer; }
+    button:hover, .file-label:hover { border-color: #d4af37; }
+    #itemName { font-family: "JetBrains Mono", monospace; font-size: 0.85rem; margin: 0; }
+    #status { min-height: 1.25rem; margin: 0; padding: 0.15rem 1rem 0; color: #f87171; font-size: 0.8rem; }
+    #drawer { display: none; gap: 0.5rem; padding: 0.6rem 1rem 0.8rem; border-bottom: 1px solid #2e384d; }
+    #drawer.open { display: flex; flex-direction: column; }
+    textarea { width: 100%; height: 7rem; resize: vertical; background: #11151c; color: #e2e8f0; border: 1px solid #2e384d; border-radius: 0.35rem; padding: 0.5rem; font: 12px/1.4 "JetBrains Mono", monospace; user-select: text; }
+    .workspace { flex: 1; display: flex; min-height: 0; }
+    #view { flex: 1; position: relative; min-width: 0; }
+    #view canvas { display: block; width: 100%; height: 100%; }
+    aside { width: 18rem; display: flex; flex-direction: column; border-left: 1px solid #2e384d; background: #11151c; }
+    aside h2 { margin: 0; padding: 0.6rem 0.75rem 0.3rem; font-size: 0.7rem; letter-spacing: 0.08em; text-transform: uppercase; color: #94a3b8; }
+    #flameNote { margin: 0; padding: 0 0.75rem 0.4rem; color: #f97316; font-size: 0.75rem; }
+    #flameNote.hidden { display: none; }
+    #parts { overflow: auto; border-bottom: 1px solid #2e384d; max-height: 45%; }
+    #parts button { display: block; width: 100%; text-align: left; background: transparent; border: 0; border-bottom: 1px solid #1f2633; border-radius: 0; padding: 0.4rem 0.75rem; font: 12px/1.4 "JetBrains Mono", monospace; }
+    #parts button[aria-current="true"] { background: #2e384d; color: #facc15; }
+    #hint { margin: 0; padding: 0.6rem 0.75rem; color: #94a3b8; font-size: 0.75rem; }
+    #hint.hidden { display: none; }
+    #detail { flex: 1; overflow: auto; margin: 0; padding: 0.6rem 0.75rem 1rem; font: 11px/1.45 "JetBrains Mono", monospace; white-space: pre-wrap; user-select: text; }
+    .spacer { flex: 1; }
+    @media (max-width: 800px) {
+      .workspace { flex-direction: column; }
+      aside { width: auto; height: 16rem; border-left: 0; border-top: 1px solid #2e384d; }
+    }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>Equipment</h1>
+    <p id="itemName"></p>
+    <span class="spacer"></span>
+    <button id="sample" type="button">Load sample sword</button>
+    <label class="file-label">Upload .json
+      <input id="file" type="file" accept="application/json,.json" hidden>
+    </label>
+    <button id="togglePaste" type="button">JSON</button>
+  </header>
+  <section id="drawer">
+    <textarea id="paste" spellcheck="false" placeholder="Paste an equipment recipe"></textarea>
+    <div><button id="apply" type="button">Apply JSON</button></div>
+  </section>
+  <p id="status" role="status"></p>
+  <div class="workspace">
+    <div id="view"></div>
+    <aside>
+      <h2>Parts</h2>
+      <p id="flameNote" class="hidden">The game spawns the particles. This view shows the light.</p>
+      <div id="parts"></div>
+      <h2>Part</h2>
+      <p id="hint">Select a part to read its JSON.</p>
+      <pre id="detail"></pre>
+    </aside>
+  </div>
+  <script type="application/json" id="sample-sword">{
+  "version": 1,
+  "kind": "sword",
+  "id": "sword",
+  "name": "Ash-gripped Iron Disced Sword",
+  "seed": 1,
+  "hand": "right",
+  "parent": "rightHandSocket",
+  "castShadow": false,
+  "materials": {
+    "ash": {
+      "color": "#c4a574",
+      "roughness": 0.72,
+      "metalness": 0.04
+    },
+    "iron": {
+      "color": "#8b939c",
+      "roughness": 0.45,
+      "metalness": 0.82
+    },
+    "cord": {
+      "color": "#a89878",
+      "roughness": 0.88,
+      "metalness": 0.0
+    }
+  },
+  "parts": [
+    {
+      "name": "grip",
+      "material": "ash",
+      "geometry": {
+        "type": "lathe",
+        "points": [
+          [
+            0.013,
+            0.0
+          ],
+          [
+            0.0194,
+            0.0274
+          ],
+          [
+            0.0162,
+            0.0938
+          ],
+          [
+            0.0184,
+            0.1564
+          ],
+          [
+            0.0216,
+            0.1955
+          ]
+        ],
+        "segments": 12
+      },
+      "position": [
+        0.0,
+        0.0,
+        0.0
+      ]
+    },
+    {
+      "name": "wrap1",
+      "material": "cord",
+      "geometry": {
+        "type": "torus",
+        "radius": 0.0216,
+        "tube": 0.005,
+        "radialSegments": 6,
+        "tubularSegments": 14
+      },
+      "position": [
+        0.0,
+        0.0652,
+        0.0
+      ],
+      "rotation": {
+        "x": 90.0,
+        "y": 0.0,
+        "z": 0.0,
+        "unit": "degrees"
+      }
+    },
+    {
+      "name": "wrap2",
+      "material": "cord",
+      "geometry": {
+        "type": "torus",
+        "radius": 0.0216,
+        "tube": 0.005,
+        "radialSegments": 6,
+        "tubularSegments": 14
+      },
+      "position": [
+        0.0,
+        0.1303,
+        0.0
+      ],
+      "rotation": {
+        "x": 90.0,
+        "y": 0.0,
+        "z": 0.0,
+        "unit": "degrees"
+      }
+    },
+    {
+      "name": "collar",
+      "material": "iron",
+      "geometry": {
+        "type": "cylinder",
+        "radiusTop": 0.0225,
+        "radiusBottom": 0.0252,
+        "height": 0.0235,
+        "radialSegments": 12
+      },
+      "position": [
+        0.0,
+        0.1873,
+        0.0
+      ]
+    },
+    {
+      "name": "pommel",
+      "material": "iron",
+      "geometry": {
+        "type": "sphere",
+        "radius": 0.0243,
+        "widthSegments": 10,
+        "heightSegments": 8
+      },
+      "position": [
+        0.0,
+        -0.0153,
+        0.0
+      ]
+    },
+    {
+      "name": "guard",
+      "material": "iron",
+      "geometry": {
+        "type": "cylinder",
+        "radiusTop": 0.046,
+        "radiusBottom": 0.046,
+        "height": 0.014,
+        "radialSegments": 14
+      },
+      "position": [
+        0.0,
+        0.1955,
+        0.0
+      ]
+    },
+    {
+      "name": "blade",
+      "material": "iron",
+      "geometry": {
+        "type": "blade",
+        "length": 0.6601,
+        "baseWidth": 0.0564,
+        "tipWidth": 0.004,
+        "thickness": 0.016,
+        "fuller": 0.4,
+        "segments": 8
+      },
+      "position": [
+        0.0,
+        0.5335,
+        0.0
+      ]
+    }
+  ],
+  "grip": {
+    "restRotation": {
+      "x": 15.0,
+      "y": 0.0,
+      "z": 25.0,
+      "unit": "degrees"
+    }
+  },
+  "options": {
+    "kind": "sword",
+    "seed": 1,
+    "tier": 2
+  },
+  "combat": {
+    "range": 3.895,
+    "arcRadians": 0.95,
+    "damage": 16.4663,
+    "attackInterval": 0.46
+  }
+}</script>
+  <script type="module">
+    import * as THREE from 'three';
+    import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+    import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
+
+    const BUILD_ERROR = 'This recipe has a part this viewer cannot build.';
+    const itemName = document.getElementById('itemName');
+    const status = document.getElementById('status');
+    const partsList = document.getElementById('parts');
+    const detail = document.getElementById('detail');
+    const hint = document.getElementById('hint');
+    const flameNote = document.getElementById('flameNote');
+    const view = document.getElementById('view');
+
+    const renderer = new THREE.WebGLRenderer({ antialias: true });
+    renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
+    renderer.outputColorSpace = THREE.SRGBColorSpace;
+    renderer.setClearColor(0x0a0c10);
+    view.appendChild(renderer.domElement);
+
+    const scene = new THREE.Scene();
+    const pmrem = new THREE.PMREMGenerator(renderer);
+    scene.environment = pmrem.fromScene(new RoomEnvironment(), 0.04).texture;
+    const camera = new THREE.PerspectiveCamera(40, 1, 0.02, 50);
+    const controls = new OrbitControls(camera, renderer.domElement);
+    controls.enableDamping = true;
+    scene.add(new THREE.AmbientLight(0xffffff, 0.35));
+    const sun = new THREE.DirectionalLight(0xfff4e5, 1.6);
+    sun.position.set(2.5, 4, 3);
+    scene.add(sun);
+    const grid = new THREE.GridHelper(6, 6, 0x3d4c63, 0x243044);
+    scene.add(grid);
+
+    const root = new THREE.Group();
+    scene.add(root);
+    let meshes = [];
+    let buttons = [];
+    let currentParts = [];
+    let flames = [];
+    let selected = -1;
+
+    function need(value, min, max) {
+      const number = Number(value);
+      if (!Number.isFinite(number) || number < min || number > max) throw new Error(BUILD_ERROR);
+      return number;
+    }
+
+    function whole(value, min, max) {
+      return Math.round(need(value, min, max));
+    }
+
+    function vec(value, min, max) {
+      if (!Array.isArray(value) || value.length !== 3) throw new Error(BUILD_ERROR);
+      return [need(value[0], min, max), need(value[1], min, max), need(value[2], min, max)];
+    }
+
+    function hexColor(value) {
+      if (typeof value !== 'string' || !/^#[0-9a-fA-F]{6}$/.test(value)) return null;
+      return Number.parseInt(value.slice(1), 16);
+    }
+
+    function bladeGeometry(spec) {
+      const length = need(spec.length, 0.05, 2.2);
+      const baseWidth = need(spec.baseWidth, 0.008, 0.5);
+      const tipWidth = need(spec.tipWidth, 0, baseWidth);
+      const thickness = need(spec.thickness, 0.003, 0.08);
+      const fuller = need(spec.fuller, 0, 1);
+      const steps = whole(spec.segments, 2, 16);
+      const positions = [];
+      for (let i = 0; i <= steps; i += 1) {
+        const t = i / steps;
+        const y = -length / 2 + length * t;
+        const width = baseWidth + (tipWidth - baseWidth) * t;
+        const thin = thickness * (1 - t * 0.75);
+        const groove = fuller * thin * 0.35 * Math.sin(Math.PI * t);
+        positions.push(
+          width / 2, y, 0,
+          0, y, thin / 2 - groove,
+          -width / 2, y, 0,
+          0, y, -thin / 2 + groove,
+        );
+      }
+      const indices = [];
+      for (let i = 0; i < steps; i += 1) {
+        for (let k = 0; k < 4; k += 1) {
+          const a = i * 4 + k;
+          const b = i * 4 + ((k + 1) % 4);
+          const c = (i + 1) * 4 + k;
+          const d = (i + 1) * 4 + ((k + 1) % 4);
+          indices.push(a, c, b, b, c, d);
+        }
+      }
+      const tip = steps * 4;
+      indices.push(tip, tip + 1, tip + 2, tip, tip + 2, tip + 3);
+      indices.push(2, 1, 0, 3, 2, 0);
+      const geometry = new THREE.BufferGeometry();
+      geometry.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
+      geometry.setIndex(indices);
+      geometry.computeVertexNormals();
+      return geometry;
+    }
+
+    function shieldGeometry(spec) {
+      const outline = spec.outline;
+      if (outline !== 'round' && outline !== 'heater' && outline !== 'tower') throw new Error(BUILD_ERROR);
+      const w = need(spec.width, 0.3, 1.2) / 2;
+      const h = need(spec.height, 0.3, 1.3) / 2;
+      const thickness = need(spec.thickness, 0.01, 0.12);
+      const shape = new THREE.Shape();
+      if (outline === 'round') {
+        shape.absarc(0, 0, Math.min(w, h), 0, Math.PI * 2, false);
+      } else if (outline === 'heater') {
+        shape.moveTo(0, -h);
+        shape.lineTo(w * 0.92, -h * 0.05);
+        shape.lineTo(w, h * 0.35);
+        shape.lineTo(w * 0.72, h);
+        shape.lineTo(-w * 0.72, h);
+        shape.lineTo(-w, h * 0.35);
+        shape.lineTo(-w * 0.92, -h * 0.05);
+        shape.closePath();
+      } else {
+        shape.moveTo(-w, -h);
+        shape.lineTo(-w, h * 0.72);
+        shape.quadraticCurveTo(0, h * 1.08, w, h * 0.72);
+        shape.lineTo(w, -h);
+        shape.closePath();
+      }
+      const geometry = new THREE.ExtrudeGeometry(shape, {
+        depth: thickness,
+        bevelEnabled: false,
+        curveSegments: outline === 'round' ? 24 : 6,
+      });
+      geometry.translate(0, 0, -thickness / 2);
+      return geometry;
+    }
+
+    function makeGeometry(spec) {
+      if (!spec || typeof spec !== 'object') throw new Error(BUILD_ERROR);
+      switch (spec.type) {
+        case 'box':
+          return new THREE.BoxGeometry(need(spec.width, 0.002, 2.5), need(spec.height, 0.002, 2.5), need(spec.depth, 0.002, 2.5));
+        case 'cylinder':
+          return new THREE.CylinderGeometry(
+            need(spec.radiusTop, 0, 1.2), need(spec.radiusBottom, 0, 1.2),
+            need(spec.height, 0.008, 2.5), whole(spec.radialSegments, 3, 32),
+          );
+        case 'sphere':
+          return new THREE.SphereGeometry(need(spec.radius, 0.004, 0.6), whole(spec.widthSegments, 3, 32), whole(spec.heightSegments, 3, 24));
+        case 'cone':
+          return new THREE.ConeGeometry(need(spec.radius, 0.003, 0.5), need(spec.height, 0.008, 0.8), whole(spec.radialSegments, 3, 32));
+        case 'torus':
+          return new THREE.TorusGeometry(
+            need(spec.radius, 0.008, 1.2), need(spec.tube, 0.002, 0.2),
+            whole(spec.radialSegments, 3, 24), whole(spec.tubularSegments, 3, 48),
+          );
+        case 'plane':
+          return new THREE.PlaneGeometry(need(spec.width, 0.01, 2), need(spec.height, 0.01, 2));
+        case 'lathe': {
+          if (!Array.isArray(spec.points) || spec.points.length < 3 || spec.points.length > 16) throw new Error(BUILD_ERROR);
+          const points = spec.points.map((point) => {
+            if (!Array.isArray(point) || point.length !== 2) throw new Error(BUILD_ERROR);
+            return new THREE.Vector2(need(point[0], 0.001, 0.6), need(point[1], -0.4, 2.4));
+          });
+          return new THREE.LatheGeometry(points, whole(spec.segments, 3, 32));
+        }
+        case 'tube': {
+          const curve = spec.curve;
+          if (!curve || curve.type !== 'quadratic') throw new Error(BUILD_ERROR);
+          const from = vec(curve.from, -2.2, 2.2);
+          const control = vec(curve.control, -2.2, 2.2);
+          const to = vec(curve.to, -2.2, 2.2);
+          const path = new THREE.QuadraticBezierCurve3(
+            new THREE.Vector3(...from), new THREE.Vector3(...control), new THREE.Vector3(...to),
+          );
+          return new THREE.TubeGeometry(path, whole(spec.tubularSegments, 3, 48), need(spec.radius, 0.002, 0.08), whole(spec.radialSegments, 3, 24), false);
+        }
+        case 'blade':
+          return bladeGeometry(spec);
+        case 'shield':
+          return shieldGeometry(spec);
+        default:
+          throw new Error(BUILD_ERROR);
+      }
+    }
+
+    function materialFor(name, materials) {
+      const entry = materials && typeof name === 'string' ? materials[name] : null;
+      if (!entry || typeof entry !== 'object') throw new Error('This recipe has a material this viewer cannot use.');
+      const color = hexColor(entry.color);
+      if (color === null) throw new Error('This recipe has a material this viewer cannot use.');
+      return new THREE.MeshStandardMaterial({
+        color,
+        roughness: need(entry.roughness, 0, 1),
+        metalness: need(entry.metalness, 0, 1),
+      });
+    }
+
+    function place(object, part) {
+      const position = vec(part.position, -3, 3);
+      object.position.set(position[0], position[1], position[2]);
+      if (part.rotation != null) {
+        const rotation = part.rotation;
+        if (!rotation || typeof rotation !== 'object' || rotation.unit !== 'degrees') throw new Error(BUILD_ERROR);
+        object.rotation.set(
+          THREE.MathUtils.degToRad(need(rotation.x, -180, 180)),
+          THREE.MathUtils.degToRad(need(rotation.y, -180, 180)),
+          THREE.MathUtils.degToRad(need(rotation.z, -180, 180)),
+        );
+      }
+    }
+
+    function release(object) {
+      object.traverse((node) => {
+        if (node.geometry) node.geometry.dispose();
+        if (node.material) node.material.dispose();
+      });
+    }
+
+    function disposeRoot() {
+      while (root.children.length) {
+        const child = root.children[0];
+        root.remove(child);
+        release(child);
+      }
+      meshes = [];
+      flames = [];
+      currentParts = [];
+      selected = -1;
+    }
+
+    function buildItem(data) {
+      if (!data || typeof data !== 'object' || Array.isArray(data)) throw new Error('This recipe is not equipment.');
+      if (!Array.isArray(data.parts) || data.parts.length < 1 || data.parts.length > 80) throw new Error('This recipe is not equipment.');
+      if (!data.materials || typeof data.materials !== 'object') throw new Error('This recipe has a material this viewer cannot use.');
+      const group = new THREE.Group();
+      const nextMeshes = [];
+      const nextFlames = [];
+      try {
+        data.parts.forEach((part, index) => {
+          if (!part || typeof part !== 'object') throw new Error(BUILD_ERROR);
+          if (part.type === 'group') {
+            const socket = new THREE.Group();
+            place(socket, part);
+            socket.userData.partIndex = index;
+            const light = part.light;
+            if (light && typeof light === 'object') {
+              const color = hexColor(light.color);
+              if (color === null) throw new Error('This recipe has a light this viewer cannot use.');
+              const intensity = need(light.intensity, 0, 50);
+              const distance = need(light.distance, 0.1, 40);
+              const point = new THREE.PointLight(color, intensity, distance);
+              const flicker = light.flicker && typeof light.flicker === 'object' ? light.flicker : {};
+              const cone = new THREE.Mesh(
+                new THREE.ConeGeometry(0.035, 0.12, 10),
+                new THREE.MeshStandardMaterial({ color: 0xfb923c, emissive: color, emissiveIntensity: 0.9, roughness: 0.45 }),
+              );
+              cone.position.y = 0.07;
+              cone.userData.partIndex = index;
+              cone.userData.restColor = color;
+              cone.userData.restIntensity = 0.9;
+              socket.add(point, cone);
+              nextFlames.push({
+                light: point,
+                base: intensity,
+                speed: need(flicker.speed == null ? 12 : flicker.speed, 0, 40),
+                variance: need(flicker.variance == null ? 0.4 : flicker.variance, 0, 1),
+                cone,
+              });
+              nextMeshes[index] = cone;
+            }
+            group.add(socket);
+            return;
+          }
+          const mesh = new THREE.Mesh(makeGeometry(part.geometry), materialFor(part.material, data.materials));
+          if (part.geometry.type === 'blade' || part.geometry.type === 'shield') mesh.material.side = THREE.DoubleSide;
+          place(mesh, part);
+          mesh.userData.partIndex = index;
+          mesh.userData.restColor = 0x000000;
+          mesh.userData.restIntensity = 0;
+          nextMeshes[index] = mesh;
+          group.add(mesh);
+        });
+      } catch (error) {
+        release(group);
+        throw error;
+      }
+      return { group, meshes: nextMeshes, flames: nextFlames, parts: data.parts };
+    }
+
+    function resize() {
+      const width = Math.max(1, view.clientWidth);
+      const height = Math.max(1, view.clientHeight);
+      camera.aspect = width / height;
+      camera.updateProjectionMatrix();
+      renderer.setSize(width, height, false);
+    }
+
+    function frame() {
+      resize();
+      const box = new THREE.Box3().setFromObject(root);
+      if (box.isEmpty()) return;
+      const size = box.getSize(new THREE.Vector3());
+      const center = box.getCenter(new THREE.Vector3());
+      const radius = Math.max(size.x, size.y, size.z, 0.25) * 0.62;
+      const distance = radius / Math.tan(THREE.MathUtils.degToRad(camera.fov) / 2);
+      grid.position.y = box.min.y;
+      controls.target.copy(center);
+      camera.position.set(center.x + distance * 0.45, center.y + distance * 0.28, center.z + distance);
+      camera.near = Math.max(0.01, distance / 80);
+      camera.far = Math.max(20, distance * 12);
+      camera.updateProjectionMatrix();
+      controls.update();
+    }
+
+    function partLabel(part, index) {
+      const name = typeof part.name === 'string' && part.name.length > 0 ? part.name.slice(0, 40) : `Part ${index + 1}`;
+      const type = part.type === 'group' ? 'socket' : (part.geometry && typeof part.geometry.type === 'string' ? part.geometry.type.slice(0, 16) : 'part');
+      return `${name}  ${type}`;
+    }
+
+    function select(index) {
+      selected = index;
+      buttons.forEach((button, buttonIndex) => {
+        if (buttonIndex === index) button.setAttribute('aria-current', 'true');
+        else button.removeAttribute('aria-current');
+      });
+      meshes.forEach((mesh) => {
+        if (!mesh || !mesh.material || !mesh.material.emissive) return;
+        mesh.material.emissive.setHex(mesh.userData.restColor || 0);
+        mesh.material.emissiveIntensity = mesh.userData.restIntensity || 0;
+      });
+      const chosen = meshes[index];
+      if (chosen && chosen.material && chosen.material.emissive) {
+        chosen.material.emissive.setHex(0xf59e0b);
+        chosen.material.emissiveIntensity = Math.max(0.55, chosen.userData.restIntensity || 0);
+      }
+      if (index >= 0 && currentParts[index]) {
+        hint.classList.add('hidden');
+        detail.textContent = JSON.stringify(currentParts[index], null, 2);
+      } else {
+        hint.classList.remove('hidden');
+        detail.textContent = '';
+      }
+    }
+
+    function showParts() {
+      partsList.replaceChildren();
+      buttons = currentParts.map((part, index) => {
+        const button = document.createElement('button');
+        button.type = 'button';
+        button.textContent = partLabel(part, index);
+        button.addEventListener('click', () => select(index));
+        partsList.appendChild(button);
+        return button;
+      });
+      flameNote.classList.toggle('hidden', flames.length === 0);
+      select(-1);
+    }
+
+    function showName(data) {
+      const name = typeof data.name === 'string' && data.name.length > 0 ? data.name.slice(0, 80) : 'Equipment';
+      itemName.textContent = name;
+      document.title = name;
+    }
+
+    function applyData(data) {
+      let built;
+      try {
+        built = buildItem(data);
+      } catch (error) {
+        const known = error instanceof Error && error.message.startsWith('This recipe');
+        status.textContent = known ? error.message : 'This recipe could not be drawn.';
+        return;
+      }
+      disposeRoot();
+      while (built.group.children.length) root.add(built.group.children[0]);
+      meshes = built.meshes;
+      flames = built.flames;
+      currentParts = built.parts;
+      status.textContent = '';
+      showName(data);
+      showParts();
+      frame();
+    }
+
+    function applyText(text) {
+      let data;
+      try {
+        data = JSON.parse(text);
+      } catch (error) {
+        status.textContent = 'That text is not valid JSON.';
+        return;
+      }
+      applyData(data);
+    }
+
+    function readFile(file) {
+      if (!file) return;
+      const reader = new FileReader();
+      reader.onload = () => applyText(String(reader.result));
+      reader.onerror = () => { status.textContent = 'That file could not be read.'; };
+      reader.readAsText(file);
+    }
+
+    document.getElementById('sample').addEventListener('click', () => {
+      applyText(document.getElementById('sample-sword').textContent);
+    });
+    document.getElementById('file').addEventListener('change', (event) => {
+      const input = event.target;
+      readFile(input.files && input.files[0]);
+      input.value = '';
+    });
+    document.getElementById('togglePaste').addEventListener('click', () => {
+      document.getElementById('drawer').classList.toggle('open');
+    });
+    document.getElementById('apply').addEventListener('click', () => {
+      applyText(document.getElementById('paste').value);
+    });
+    window.addEventListener('dragover', (event) => event.preventDefault());
+    window.addEventListener('drop', (event) => {
+      event.preventDefault();
+      const file = event.dataTransfer && event.dataTransfer.files && event.dataTransfer.files[0];
+      readFile(file);
+    });
+
+    const raycaster = new THREE.Raycaster();
+    const pointer = new THREE.Vector2();
+    let down = null;
+    renderer.domElement.addEventListener('pointerdown', (event) => { down = [event.clientX, event.clientY]; });
+    renderer.domElement.addEventListener('pointerup', (event) => {
+      if (!down) return;
+      const dx = event.clientX - down[0];
+      const dy = event.clientY - down[1];
+      down = null;
+      if (dx * dx + dy * dy > 9) return;
+      const rect = renderer.domElement.getBoundingClientRect();
+      pointer.x = ((event.clientX - rect.left) / rect.width) * 2 - 1;
+      pointer.y = -((event.clientY - rect.top) / rect.height) * 2 + 1;
+      raycaster.setFromCamera(pointer, camera);
+      const hits = raycaster.intersectObjects(root.children, true);
+      if (!hits.length) {
+        select(-1);
+        return;
+      }
+      let node = hits[0].object;
+      while (node && node.userData.partIndex === undefined && node.parent) node = node.parent;
+      if (node && node.userData.partIndex !== undefined) select(node.userData.partIndex);
+    });
+
+    window.addEventListener('resize', resize);
+    function animate(time) {
+      const seconds = time * 0.001;
+      flames.forEach((flame) => {
+        const wobble = Math.sin(seconds * flame.speed) * flame.variance;
+        flame.light.intensity = Math.max(0, flame.base * (1 + wobble * 0.5));
+        const scale = 1 + wobble * 0.12;
+        flame.cone.scale.set(1, Math.max(0.4, scale), 1);
+      });
+      controls.update();
+      renderer.render(scene, camera);
+      requestAnimationFrame(animate);
+    }
+    applyText(document.getElementById('sample-sword').textContent);
+    requestAnimationFrame(animate);
+  </script>
+</body>
+</html>
