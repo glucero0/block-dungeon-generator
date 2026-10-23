@@ -1,0 +1,87 @@
+---
+description: Keep the index.html visualizer in sync with any change to the generator's JSON output
+globs: blk_dungeon_gen/**/*.py,index.html
+alwaysApply: false
+---
+
+# Keep the visualizer in sync with the generator
+
+`index.html` is the viewer for the JSON that `blk_dungeon_gen` writes. When a change
+to generation alters the output, update the viewer in the same change.
+
+## When this applies
+
+- A field is added, removed, renamed, or changes meaning or units in the output
+  (rooms, doors, `spawns`, `chest`, `sconce`, `rocks`, `props`, `trees`, `scenery`,
+  `approach`, `transitions`, `options`, and so on).
+- A new block, theme, prop type, or scenery type is introduced.
+- A new CLI option changes what the file contains.
+
+## Floors and heights (always keep working)
+
+The generator stacks stories 10 m apart (`room.floor`, `room.y`, `storyHeight`, door `y`,
+`stair.fromY`/`toY`). The viewer must keep showing that correctly. Whenever generation
+changes anything about floors, elevation, or story height:
+
+- Rooms, walls, doors, stairwell ramps, and every placed object (spawns, chests, sconces,
+  props) must sit at their real `y` in the 3D view, not at ground level.
+- Every object must carry its floor (`floors` array; a stairwell spans two) so the floor
+  selector (`All`, `F1`, `F2`, ...) in the header can filter it in both Plan and 3D.
+- New object lists must be added to `filterByFloor` in `index.html`.
+- Check with a multi-floor file: `python -m blk_dungeon_gen --seed 1 --floors 3 -o out/ruins.json`.
+  Floors must appear stacked in 3D, and each floor button must show only that story
+  (plus any stairwell that touches it).
+
+## Entrance and exit (always keep working)
+
+The viewer finds the antechamber and the exit from `role: antechamber` / `role: exit`
+(or `block: entrance` / `exit`) in `roomMarker()`. If those fields change, or a new
+landmark is added (for example an outdoor exit), update `roomMarker`, `MARKER_STYLES`,
+the plan badges, the 3D beacons, the Landmarks buttons, and search so they still stand out.
+
+## Exit trail, vistas, and sky (always keep working)
+
+Ruins write `exitGate` and `exitArea` (arch, trail polygons, trees, scenery, and `approach.vista`).
+Hubs write each spoke's `vista`, `hubArea.mountains`, and `hubArea.environment`. The viewer must
+keep drawing the exit trail, the vista paths with their scrub and trees, the mountains, and a
+daylight sky in 3D. Mountains stay out of the fit bounds. `ruin-leave` has `y` and `floor`;
+the floor selector must keep that trigger on the exit chamber's story. Sky and mountains follow
+the Sky & Horizon layer.
+
+## Hub files (always keep working)
+
+`--hub` writes `kind: 'hub'` with `hubArea`, `structure`, and spoke transitions instead of an
+approach trail. The viewer must keep showing the plaza, each spoke and its name, the structure
+(roof shape, towers, or fire ring), the respawn point, and `from-<name>` arrivals (transitions
+whose `volume` is `null`). When a structure type, roof name, or part type is added in
+`blk_dungeon_gen/structures.py`, add its look to `drawHubStructure` (Plan) and `addHubStructure`
+(3D) in `index.html`. Check each type with `--hub --structure <type>`.
+
+## What to do
+
+1. Find where the viewer reads the affected data. Search `index.html` for the field
+   name (for example `room.spawns`, `raw.trees`, `room.chest`).
+2. Make the viewer read, draw, and inspect the new or changed data in both Plan and
+   3D views where that makes sense.
+3. Add a layer toggle for any new category of object, next to the existing ones in
+   "Map Layers", so it can be hidden.
+4. Keep new keys out of the Entity Inspector's attribute table if they are lists of
+   objects. Add them to `skipKeys` and rely on the raw JSON fragment instead.
+5. Refresh `SAMPLE_ANCIENT_RUINS_DATA` only if the old sample would no longer load.
+   The viewer must still open older files without errors, so treat new fields as
+   optional (`Array.isArray(x) ? x : []`).
+6. If the viewer's behavior or controls change, update the "View a layout" section
+   of `README.md`.
+
+## Check before finishing
+
+- Generate a file with `python -m blk_dungeon_gen --seed 1 -o out/ruins.json`, load
+  it in `index.html`, and confirm the new data appears and nothing throws in the
+  browser console.
+- If the viewer cannot show something yet, say so in the summary. Do not leave it
+  silently unsupported.
+
+## Security
+
+- The viewer renders user-supplied JSON. Build DOM with `textContent`, not
+  `innerHTML`, for any value taken from the file, and never `eval` it.
