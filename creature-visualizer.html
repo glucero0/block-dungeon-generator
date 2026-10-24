@@ -1,0 +1,1509 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Creatures</title>
+  <script type="importmap">
+  {
+    "imports": {
+      "three": "https://unpkg.com/three@0.170.0/build/three.module.js",
+      "three/addons/": "https://unpkg.com/three@0.170.0/examples/jsm/"
+    }
+  }
+  </script>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Cinzel:wght@600;700&family=JetBrains+Mono:wght@400;500&family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
+  <script>
+    tailwind.config = {
+      theme: {
+        extend: {
+          fontFamily: {
+            title: ['Cinzel', 'serif'],
+            mono: ['"JetBrains Mono"', 'monospace'],
+            sans: ['Inter', 'sans-serif'],
+          },
+          colors: {
+            dungeon: { 950: '#0a0c10', 900: '#11151c', 800: '#1f2633', 700: '#2e384d', accent: '#d4af37', torch: '#f97316' }
+          }
+        }
+      }
+    }
+  </script>
+  <style>
+    html, body { height: 100%; margin: 0; background: #0a0c10; color: #e2e8f0; }
+    body { display: flex; flex-direction: column; font-family: Inter, sans-serif; user-select: none; }
+    header { display: flex; align-items: center; gap: 0.75rem; padding: 0.7rem 1rem; border-bottom: 1px solid #2e384d; }
+    h1 { font-family: Cinzel, serif; color: #d4af37; font-size: 1.15rem; margin: 0; }
+    button, .file-label { font: 500 0.8rem/1 Inter, sans-serif; color: #e2e8f0; background: #1f2633; border: 1px solid #2e384d; border-radius: 0.35rem; padding: 0.35rem 0.7rem; cursor: pointer; }
+    button:hover, .file-label:hover { border-color: #d4af37; }
+    #creatureName { font-family: "JetBrains Mono", monospace; font-size: 0.85rem; margin: 0; }
+    #status { min-height: 1.25rem; margin: 0; padding: 0.15rem 1rem 0; color: #f87171; font-size: 0.8rem; }
+    #drawer { display: none; gap: 0.5rem; padding: 0.6rem 1rem 0.8rem; border-bottom: 1px solid #2e384d; }
+    #drawer.open { display: flex; flex-direction: column; }
+    textarea { width: 100%; height: 7rem; resize: vertical; background: #11151c; color: #e2e8f0; border: 1px solid #2e384d; border-radius: 0.35rem; padding: 0.5rem; font: 12px/1.4 "JetBrains Mono", monospace; user-select: text; }
+    .workspace { flex: 1; display: flex; min-height: 0; }
+    #view { flex: 1; position: relative; min-width: 0; }
+    #view canvas { display: block; width: 100%; height: 100%; }
+    aside { width: 20rem; display: flex; flex-direction: column; border-left: 1px solid #2e384d; background: #11151c; }
+    aside h2 { margin: 0; padding: 0.6rem 0.75rem 0.3rem; font-size: 0.7rem; letter-spacing: 0.08em; text-transform: uppercase; color: #94a3b8; }
+    #facts { margin: 0; padding: 0 0.75rem 0.6rem; font: 12px/1.45 "JetBrains Mono", monospace; white-space: pre-wrap; color: #e2e8f0; }
+    #parts { overflow: auto; border-top: 1px solid #2e384d; border-bottom: 1px solid #2e384d; max-height: 32%; }
+    #parts button { display: block; width: 100%; text-align: left; background: transparent; border: 0; border-bottom: 1px solid #1f2633; border-radius: 0; padding: 0.4rem 0.75rem; font: 12px/1.4 "JetBrains Mono", monospace; }
+    #parts button[aria-current="true"] { background: #2e384d; color: #facc15; }
+    #hint { margin: 0; padding: 0.6rem 0.75rem; color: #94a3b8; font-size: 0.75rem; }
+    #hint.hidden { display: none; }
+    #detail { flex: 1; overflow: auto; margin: 0; padding: 0.6rem 0.75rem 1rem; font: 11px/1.45 "JetBrains Mono", monospace; white-space: pre-wrap; user-select: text; }
+    .spacer { flex: 1; }
+    @media (max-width: 800px) {
+      .workspace { flex-direction: column; }
+      aside { width: auto; height: 18rem; border-left: 0; border-top: 1px solid #2e384d; }
+    }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>Creatures</h1>
+    <p id="creatureName"></p>
+    <span class="spacer"></span>
+    <button id="sample" type="button">Load sample warrior</button>
+    <label class="file-label">Upload .json
+      <input id="file" type="file" accept="application/json,.json" hidden>
+    </label>
+    <button id="togglePaste" type="button">JSON</button>
+  </header>
+  <section id="drawer">
+    <textarea id="paste" spellcheck="false" placeholder="Paste a creature file"></textarea>
+    <div><button id="apply" type="button">Apply JSON</button></div>
+  </section>
+  <p id="status" role="status"></p>
+  <div class="workspace">
+    <div id="view"></div>
+    <aside>
+      <h2>Creature</h2>
+      <pre id="facts"></pre>
+      <h2>Parts</h2>
+      <div id="parts"></div>
+      <h2>Part</h2>
+      <p id="hint">Select a part to read its JSON.</p>
+      <pre id="detail"></pre>
+    </aside>
+  </div>
+  <script type="application/json" id="sample-creature">{
+  "name": "Ash Skeletal Warrior",
+  "description": "A bone warrior. Stats and weapons match the Harper's Row skeletal warrior.",
+  "species": "skeleton",
+  "seed": 1,
+  "plan": "humanoid",
+  "scale": 1.0,
+  "options": {
+    "species": "skeleton",
+    "seed": 1
+  },
+  "stats": {
+    "health": 36,
+    "damage": 15,
+    "moveSpeed": 3.6,
+    "wanderFactor": 0.42,
+    "radius": 0.7,
+    "sightRange": 26,
+    "windup": 0.72,
+    "recover": 1.15,
+    "minWindup": 0.22,
+    "minRecover": 0.28
+  },
+  "materials": {
+    "bone": {
+      "color": "#c9c1ad",
+      "roughness": 0.78,
+      "metalness": 0.05
+    },
+    "socket": {
+      "color": "#1c140f",
+      "roughness": 0.9,
+      "metalness": 0.02
+    },
+    "ember": {
+      "color": "#ff6a1a",
+      "roughness": 0.4,
+      "metalness": 0.0
+    },
+    "iron": {
+      "color": "#8b939c",
+      "roughness": 0.45,
+      "metalness": 0.82
+    }
+  },
+  "joints": [
+    {
+      "name": "fall",
+      "parent": null,
+      "position": [
+        0.0,
+        0.0,
+        0.0
+      ]
+    },
+    {
+      "name": "spine",
+      "parent": "fall",
+      "position": [
+        0.0,
+        3.05,
+        0.0
+      ]
+    },
+    {
+      "name": "skull",
+      "parent": "spine",
+      "position": [
+        0.0,
+        1.16,
+        0.03
+      ]
+    },
+    {
+      "name": "SkeletonArm_R",
+      "parent": "spine",
+      "position": [
+        0.48,
+        0.85,
+        0.0
+      ]
+    },
+    {
+      "name": "Forearm_R",
+      "parent": "SkeletonArm_R",
+      "position": [
+        0.0,
+        -0.98,
+        0.0
+      ]
+    },
+    {
+      "name": "WristJoint_R",
+      "parent": "Forearm_R",
+      "position": [
+        0.0,
+        -0.86,
+        0.0
+      ]
+    },
+    {
+      "name": "HandSocket_R",
+      "parent": "WristJoint_R",
+      "position": [
+        0.0,
+        -0.02,
+        0.06
+      ]
+    },
+    {
+      "name": "SkeletonArm_L",
+      "parent": "spine",
+      "position": [
+        -0.48,
+        0.85,
+        0.0
+      ]
+    },
+    {
+      "name": "Forearm_L",
+      "parent": "SkeletonArm_L",
+      "position": [
+        0.0,
+        -0.98,
+        0.0
+      ]
+    },
+    {
+      "name": "WristJoint_L",
+      "parent": "Forearm_L",
+      "position": [
+        0.0,
+        -0.86,
+        0.0
+      ]
+    },
+    {
+      "name": "HandSocket_L",
+      "parent": "WristJoint_L",
+      "position": [
+        0.0,
+        -0.02,
+        0.06
+      ]
+    },
+    {
+      "name": "Hip_L",
+      "parent": "fall",
+      "position": [
+        -0.18,
+        2.9,
+        0.0
+      ]
+    },
+    {
+      "name": "Knee_L",
+      "parent": "Hip_L",
+      "position": [
+        0.0,
+        -1.28,
+        0.0
+      ]
+    },
+    {
+      "name": "Hip_R",
+      "parent": "fall",
+      "position": [
+        0.18,
+        2.9,
+        0.0
+      ]
+    },
+    {
+      "name": "Knee_R",
+      "parent": "Hip_R",
+      "position": [
+        0.0,
+        -1.28,
+        0.0
+      ]
+    }
+  ],
+  "parts": [
+    {
+      "name": "pelvis",
+      "joint": "fall",
+      "material": "bone",
+      "geometry": {
+        "type": "box",
+        "width": 0.62,
+        "height": 0.22,
+        "depth": 0.32
+      },
+      "position": [
+        0.0,
+        2.95,
+        0.0
+      ]
+    },
+    {
+      "name": "column",
+      "joint": "spine",
+      "material": "bone",
+      "geometry": {
+        "type": "box",
+        "width": 0.22,
+        "height": 0.85,
+        "depth": 0.2
+      },
+      "position": [
+        0.0,
+        0.45,
+        0.0
+      ]
+    },
+    {
+      "name": "neck",
+      "joint": "spine",
+      "material": "bone",
+      "geometry": {
+        "type": "capsule",
+        "radius": 0.07,
+        "length": 0.28,
+        "capSegments": 2,
+        "radialSegments": 6
+      },
+      "position": [
+        0.0,
+        0.98,
+        0.03
+      ]
+    },
+    {
+      "name": "cranium",
+      "joint": "skull",
+      "material": "bone",
+      "geometry": {
+        "type": "sphere",
+        "radius": 0.26,
+        "widthSegments": 8,
+        "heightSegments": 6
+      },
+      "position": [
+        0.0,
+        0.18,
+        -0.02
+      ]
+    },
+    {
+      "name": "jaw",
+      "joint": "skull",
+      "material": "bone",
+      "geometry": {
+        "type": "box",
+        "width": 0.22,
+        "height": 0.08,
+        "depth": 0.16
+      },
+      "position": [
+        0.0,
+        -0.08,
+        0.08
+      ]
+    },
+    {
+      "name": "rib0",
+      "joint": "spine",
+      "material": "bone",
+      "geometry": {
+        "type": "torus",
+        "radius": 0.38,
+        "tube": 0.035,
+        "radialSegments": 6,
+        "tubularSegments": 12
+      },
+      "position": [
+        0.0,
+        0.28,
+        0.04
+      ],
+      "rotation": {
+        "x": 90.0,
+        "y": 0.0,
+        "z": 0.0,
+        "unit": "degrees"
+      }
+    },
+    {
+      "name": "rib1",
+      "joint": "spine",
+      "material": "bone",
+      "geometry": {
+        "type": "torus",
+        "radius": 0.38,
+        "tube": 0.035,
+        "radialSegments": 6,
+        "tubularSegments": 12
+      },
+      "position": [
+        0.0,
+        0.46,
+        0.04
+      ],
+      "rotation": {
+        "x": 90.0,
+        "y": 0.0,
+        "z": 0.0,
+        "unit": "degrees"
+      }
+    },
+    {
+      "name": "rib2",
+      "joint": "spine",
+      "material": "bone",
+      "geometry": {
+        "type": "torus",
+        "radius": 0.38,
+        "tube": 0.035,
+        "radialSegments": 6,
+        "tubularSegments": 12
+      },
+      "position": [
+        0.0,
+        0.64,
+        0.04
+      ],
+      "rotation": {
+        "x": 90.0,
+        "y": 0.0,
+        "z": 0.0,
+        "unit": "degrees"
+      }
+    },
+    {
+      "name": "rib3",
+      "joint": "spine",
+      "material": "bone",
+      "geometry": {
+        "type": "torus",
+        "radius": 0.38,
+        "tube": 0.035,
+        "radialSegments": 6,
+        "tubularSegments": 12
+      },
+      "position": [
+        0.0,
+        0.82,
+        0.04
+      ],
+      "rotation": {
+        "x": 90.0,
+        "y": 0.0,
+        "z": 0.0,
+        "unit": "degrees"
+      }
+    },
+    {
+      "name": "cage",
+      "joint": "spine",
+      "material": "socket",
+      "geometry": {
+        "type": "box",
+        "width": 0.5,
+        "height": 0.36,
+        "depth": 0.08
+      },
+      "position": [
+        0.0,
+        0.55,
+        0.12
+      ]
+    },
+    {
+      "name": "scrap",
+      "joint": "SkeletonArm_R",
+      "material": "iron",
+      "geometry": {
+        "type": "box",
+        "width": 0.24,
+        "height": 0.1,
+        "depth": 0.16
+      },
+      "position": [
+        0.02,
+        -0.2,
+        0.06
+      ]
+    },
+    {
+      "name": "upperL",
+      "joint": "SkeletonArm_L",
+      "material": "bone",
+      "geometry": {
+        "type": "capsule",
+        "radius": 0.07,
+        "length": 0.81,
+        "capSegments": 2,
+        "radialSegments": 6
+      },
+      "position": [
+        0.0,
+        -0.5,
+        0.0
+      ]
+    },
+    {
+      "name": "foreL",
+      "joint": "Forearm_L",
+      "material": "bone",
+      "geometry": {
+        "type": "capsule",
+        "radius": 0.055,
+        "length": 0.74,
+        "capSegments": 2,
+        "radialSegments": 6
+      },
+      "position": [
+        0.0,
+        -0.42,
+        0.0
+      ]
+    },
+    {
+      "name": "handL",
+      "joint": "WristJoint_L",
+      "material": "bone",
+      "geometry": {
+        "type": "box",
+        "width": 0.16,
+        "height": 0.14,
+        "depth": 0.16
+      },
+      "position": [
+        0.0,
+        0.0,
+        0.0
+      ]
+    },
+    {
+      "name": "thumbL",
+      "joint": "WristJoint_L",
+      "material": "bone",
+      "geometry": {
+        "type": "box",
+        "width": 0.06,
+        "height": 0.1,
+        "depth": 0.06
+      },
+      "position": [
+        -0.08,
+        0.02,
+        0.08
+      ]
+    },
+    {
+      "name": "thighL",
+      "joint": "Hip_L",
+      "material": "bone",
+      "geometry": {
+        "type": "capsule",
+        "radius": 0.08,
+        "length": 1.09,
+        "capSegments": 2,
+        "radialSegments": 6
+      },
+      "position": [
+        0.0,
+        -0.65,
+        0.0
+      ]
+    },
+    {
+      "name": "shinL",
+      "joint": "Knee_L",
+      "material": "bone",
+      "geometry": {
+        "type": "capsule",
+        "radius": 0.06,
+        "length": 1.08,
+        "capSegments": 2,
+        "radialSegments": 6
+      },
+      "position": [
+        0.0,
+        -0.6,
+        0.0
+      ]
+    },
+    {
+      "name": "eyeL",
+      "joint": "skull",
+      "material": "ember",
+      "geometry": {
+        "type": "sphere",
+        "radius": 0.02,
+        "widthSegments": 6,
+        "heightSegments": 5
+      },
+      "position": [
+        -0.1,
+        0.08,
+        0.14
+      ]
+    },
+    {
+      "name": "upperR",
+      "joint": "SkeletonArm_R",
+      "material": "bone",
+      "geometry": {
+        "type": "capsule",
+        "radius": 0.07,
+        "length": 0.81,
+        "capSegments": 2,
+        "radialSegments": 6
+      },
+      "position": [
+        0.0,
+        -0.5,
+        0.0
+      ]
+    },
+    {
+      "name": "foreR",
+      "joint": "Forearm_R",
+      "material": "bone",
+      "geometry": {
+        "type": "capsule",
+        "radius": 0.055,
+        "length": 0.74,
+        "capSegments": 2,
+        "radialSegments": 6
+      },
+      "position": [
+        0.0,
+        -0.42,
+        0.0
+      ]
+    },
+    {
+      "name": "handR",
+      "joint": "WristJoint_R",
+      "material": "bone",
+      "geometry": {
+        "type": "box",
+        "width": 0.16,
+        "height": 0.14,
+        "depth": 0.16
+      },
+      "position": [
+        0.0,
+        0.0,
+        0.0
+      ]
+    },
+    {
+      "name": "thumbR",
+      "joint": "WristJoint_R",
+      "material": "bone",
+      "geometry": {
+        "type": "box",
+        "width": 0.06,
+        "height": 0.1,
+        "depth": 0.06
+      },
+      "position": [
+        0.08,
+        0.02,
+        0.08
+      ]
+    },
+    {
+      "name": "thighR",
+      "joint": "Hip_R",
+      "material": "bone",
+      "geometry": {
+        "type": "capsule",
+        "radius": 0.08,
+        "length": 1.09,
+        "capSegments": 2,
+        "radialSegments": 6
+      },
+      "position": [
+        0.0,
+        -0.65,
+        0.0
+      ]
+    },
+    {
+      "name": "shinR",
+      "joint": "Knee_R",
+      "material": "bone",
+      "geometry": {
+        "type": "capsule",
+        "radius": 0.06,
+        "length": 1.08,
+        "capSegments": 2,
+        "radialSegments": 6
+      },
+      "position": [
+        0.0,
+        -0.6,
+        0.0
+      ]
+    },
+    {
+      "name": "eyeR",
+      "joint": "skull",
+      "material": "ember",
+      "geometry": {
+        "type": "sphere",
+        "radius": 0.02,
+        "widthSegments": 6,
+        "heightSegments": 5
+      },
+      "position": [
+        0.1,
+        0.08,
+        0.14
+      ]
+    }
+  ],
+  "weapons": [
+    {
+      "id": "sword",
+      "range": 4.4
+    },
+    {
+      "id": "mace",
+      "range": 3.35
+    },
+    {
+      "id": "hammer",
+      "range": 3.8
+    },
+    {
+      "id": "bow",
+      "range": 26
+    }
+  ]
+}</script>
+  <script type="module">
+    import * as THREE from 'three';
+    import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+    import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
+
+    const BUILD_ERROR = 'This file has a part this viewer cannot build.';
+    const creatureName = document.getElementById('creatureName');
+    const status = document.getElementById('status');
+    const facts = document.getElementById('facts');
+    const partsList = document.getElementById('parts');
+    const detail = document.getElementById('detail');
+    const hint = document.getElementById('hint');
+    const view = document.getElementById('view');
+
+    const renderer = new THREE.WebGLRenderer({ antialias: true });
+    renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
+    renderer.outputColorSpace = THREE.SRGBColorSpace;
+    renderer.setClearColor(0x0a0c10);
+    view.appendChild(renderer.domElement);
+
+    const scene = new THREE.Scene();
+    const pmrem = new THREE.PMREMGenerator(renderer);
+    scene.environment = pmrem.fromScene(new RoomEnvironment(), 0.04).texture;
+    const camera = new THREE.PerspectiveCamera(40, 1, 0.05, 80);
+    const controls = new OrbitControls(camera, renderer.domElement);
+    controls.enableDamping = true;
+    scene.add(new THREE.AmbientLight(0xffffff, 0.45));
+    const sun = new THREE.DirectionalLight(0xfff4e5, 1.5);
+    sun.position.set(4, 8, 6);
+    scene.add(sun);
+    const grid = new THREE.GridHelper(10, 10, 0x3d4c63, 0x243044);
+    scene.add(grid);
+
+    const root = new THREE.Group();
+    scene.add(root);
+    let rig = null;
+    let meshes = [];
+    let buttons = [];
+    let currentParts = [];
+    let selected = -1;
+
+    const GAIT_FLATNESS = 0.97;
+    const GAIT_NORM = Math.asin(GAIT_FLATNESS);
+    const READY = { sx: -0.9, sy: 0.1, sz: 0.3, ex: -0.8, wx: 0.9, tx: 0, ty: 0 };
+    const WINDUP = { sx: -1.6, sy: 0, sz: 1.1, ex: -1.3, wx: 0.4, tx: -0.1, ty: 0.4 };
+    const CONTACT = { sx: -1.6, sy: -0.2, sz: -0.3, ex: -0.1, wx: 1.7, tx: 0.18, ty: -0.3 };
+    const FOLLOW = { sx: -1.25, sy: -0.45, sz: -0.5, ex: -0.05, wx: 1.7, tx: 0.28, ty: -0.42 };
+    const OFF = { sx: 0.05, sy: 0, sz: -0.2, ex: -0.3, wx: 0, tx: 0, ty: 0 };
+
+    function gaitWave(phase) {
+      return Math.asin(GAIT_FLATNESS * Math.sin(phase)) / GAIT_NORM;
+    }
+
+    function mixPose(from, to, amount) {
+      const out = {};
+      Object.keys(from).forEach((key) => {
+        out[key] = from[key] + (to[key] - from[key]) * amount;
+      });
+      return out;
+    }
+
+    function strikePose(time) {
+      const loop = time % 2.6;
+      if (loop < 0.7) return READY;
+      if (loop < 1.15) return mixPose(READY, WINDUP, (loop - 0.7) / 0.45);
+      if (loop < 1.35) return mixPose(WINDUP, CONTACT, (loop - 1.15) / 0.2);
+      if (loop < 1.7) return mixPose(CONTACT, FOLLOW, (loop - 1.35) / 0.35);
+      if (loop < 2.2) return mixPose(FOLLOW, READY, (loop - 1.7) / 0.5);
+      return READY;
+    }
+
+    function need(value, min, max) {
+      const number = Number(value);
+      if (!Number.isFinite(number) || number < min || number > max) throw new Error(BUILD_ERROR);
+      return number;
+    }
+
+    function whole(value, min, max) {
+      return Math.round(need(value, min, max));
+    }
+
+    function vec(value, min, max) {
+      if (!Array.isArray(value) || value.length !== 3) throw new Error(BUILD_ERROR);
+      return [need(value[0], min, max), need(value[1], min, max), need(value[2], min, max)];
+    }
+
+    function hexColor(value) {
+      if (typeof value !== 'string' || !/^#[0-9a-fA-F]{6}$/.test(value)) return null;
+      return Number.parseInt(value.slice(1), 16);
+    }
+
+    function makeGeometry(spec) {
+      if (!spec || typeof spec !== 'object') throw new Error(BUILD_ERROR);
+      switch (spec.type) {
+        case 'box':
+          return new THREE.BoxGeometry(need(spec.width, 0.02, 5), need(spec.height, 0.02, 5), need(spec.depth, 0.02, 5));
+        case 'sphere':
+          return new THREE.SphereGeometry(need(spec.radius, 0.012, 1.6), whole(spec.widthSegments, 3, 24), whole(spec.heightSegments, 3, 16));
+        case 'cylinder':
+          return new THREE.CylinderGeometry(
+            need(spec.radiusTop, 0, 1.6), need(spec.radiusBottom, 0, 1.6),
+            need(spec.height, 0.02, 6), whole(spec.radialSegments, 3, 24),
+          );
+        case 'capsule':
+          return new THREE.CapsuleGeometry(
+            need(spec.radius, 0.012, 1.6), need(spec.length, 0.04, 6),
+            whole(spec.capSegments, 1, 8), whole(spec.radialSegments, 3, 16),
+          );
+        case 'cone':
+          return new THREE.ConeGeometry(need(spec.radius, 0.01, 1), need(spec.height, 0.03, 2.5), whole(spec.radialSegments, 3, 24));
+        case 'torus':
+          return new THREE.TorusGeometry(
+            need(spec.radius, 0.03, 2), need(spec.tube, 0.008, 0.4),
+            whole(spec.radialSegments, 3, 16), whole(spec.tubularSegments, 3, 32),
+          );
+        default:
+          throw new Error(BUILD_ERROR);
+      }
+    }
+
+    function materialFor(name, materials, partName) {
+      const entry = materials && typeof name === 'string' ? materials[name] : null;
+      if (!entry || typeof entry !== 'object') throw new Error('This file has a material this viewer cannot use.');
+      const color = hexColor(entry.color);
+      if (color === null) throw new Error('This file has a material this viewer cannot use.');
+      const coat = furCoat(entry);
+      if (coat && coat.belly !== null) return wolfFurMaterial(coat, entry, furRegion(partName));
+      const material = new THREE.MeshStandardMaterial({
+        color,
+        roughness: need(entry.roughness, 0, 1),
+        metalness: need(entry.metalness, 0, 1),
+      });
+      if (coat) material.userData.fur = coat;
+      return material;
+    }
+
+    const FUR_PATTERNS = { solid: true, agouti: true, brindle: true, patch: true };
+    const FUR_NOISE = [
+      'vec3 furMod289(vec3 x){return x-floor(x*(1.0/289.0))*289.0;}',
+      'vec4 furMod289v(vec4 x){return x-floor(x*(1.0/289.0))*289.0;}',
+      'vec4 furPermute(vec4 x){return furMod289v(((x*34.0)+1.0)*x);}',
+      'vec4 furTaylor(vec4 r){return 1.79284291400159-0.85373472095314*r;}',
+      'float furSnoise(vec3 v){',
+      '  const vec2 C=vec2(1.0/6.0,1.0/3.0);',
+      '  const vec4 D=vec4(0.0,0.5,1.0,2.0);',
+      '  vec3 i=floor(v+dot(v,C.yyy));',
+      '  vec3 x0=v-i+dot(i,C.xxx);',
+      '  vec3 g=step(x0.yzx,x0.xyz);',
+      '  vec3 l=1.0-g;',
+      '  vec3 i1=min(g.xyz,l.zxy);',
+      '  vec3 i2=max(g.xyz,l.zxy);',
+      '  vec3 x1=x0-i1+C.xxx;',
+      '  vec3 x2=x0-i2+C.yyy;',
+      '  vec3 x3=x0-D.yyy;',
+      '  i=furMod289(i);',
+      '  vec4 p=furPermute(furPermute(furPermute(i.z+vec4(0.0,i1.z,i2.z,1.0))+i.y+vec4(0.0,i1.y,i2.y,1.0))+i.x+vec4(0.0,i1.x,i2.x,1.0));',
+      '  float n_=0.142857142857;',
+      '  vec3 ns=n_*D.wyz-D.xzx;',
+      '  vec4 j=p-49.0*floor(p*ns.z*ns.z);',
+      '  vec4 x_=floor(j*ns.z);',
+      '  vec4 y_=floor(j-7.0*x_);',
+      '  vec4 xx=x_*ns.x+ns.yyyy;',
+      '  vec4 yy=y_*ns.x+ns.yyyy;',
+      '  vec4 h=1.0-abs(xx)-abs(yy);',
+      '  vec4 b0=vec4(xx.xy,yy.xy);',
+      '  vec4 b1=vec4(xx.zw,yy.zw);',
+      '  vec4 s0=floor(b0)*2.0+1.0;',
+      '  vec4 s1=floor(b1)*2.0+1.0;',
+      '  vec4 sh=-step(h,vec4(0.0));',
+      '  vec4 a0=b0.xzyw+s0.xzyw*sh.xxyy;',
+      '  vec4 a1=b1.xzyw+s1.xzyw*sh.zzww;',
+      '  vec3 p0=vec3(a0.xy,h.x);',
+      '  vec3 p1=vec3(a0.zw,h.y);',
+      '  vec3 p2=vec3(a1.xy,h.z);',
+      '  vec3 p3=vec3(a1.zw,h.w);',
+      '  vec4 norm=furTaylor(vec4(dot(p0,p0),dot(p1,p1),dot(p2,p2),dot(p3,p3)));',
+      '  p0*=norm.x; p1*=norm.y; p2*=norm.z; p3*=norm.w;',
+      '  vec4 m=max(0.6-vec4(dot(x0,x0),dot(x1,x1),dot(x2,x2),dot(x3,x3)),0.0);',
+      '  m=m*m;',
+      '  return 42.0*dot(m*m,vec4(dot(p0,x0),dot(p1,x1),dot(p2,x2),dot(p3,x3)));',
+      '}',
+    ].join('\n');
+
+    function furCoat(entry) {
+      const present = entry.length !== undefined || entry.tip !== undefined || entry.pattern !== undefined || entry.belly !== undefined;
+      if (!present) return null;
+      const color = hexColor(entry.color);
+      const length = Number(entry.length);
+      const tip = hexColor(entry.tip);
+      const belly = entry.belly === undefined ? null : hexColor(entry.belly);
+      if (color === null || !Number.isFinite(length) || length < 0.008 || length > 0.8 || tip === null || !FUR_PATTERNS[entry.pattern]) {
+        throw new Error('This file has a material this viewer cannot use.');
+      }
+      if (entry.belly !== undefined && belly === null) throw new Error('This file has a material this viewer cannot use.');
+      return { color, length, tip, pattern: entry.pattern, belly };
+    }
+
+    function furRegion(partName) {
+      const name = typeof partName === 'string' ? partName : '';
+      if (name.indexOf('tail') === 0) return 0.85;
+      if (name === 'neck') return 0.7;
+      if (name === 'belly' || name === 'abdomen') return 0.5;
+      if (name === 'chest' || name === 'pelvis') return 0.16;
+      if (name === 'cranium' || name === 'cheeks' || name === 'jaw' || name === 'snout') return 0.08;
+      if (name.indexOf('ear') === 0) return 0.2;
+      return 0.14;
+    }
+
+    function wolfFurMaterial(coat, entry, gain) {
+      const roughness = Math.min(0.95, Math.max(0.85, need(entry.roughness, 0, 1)));
+      const material = new THREE.MeshPhysicalMaterial({
+        color: coat.color,
+        roughness,
+        metalness: 0,
+        specularIntensity: 0.18,
+        sheen: 0.85,
+        sheenRoughness: 0.8,
+        sheenColor: new THREE.Color(coat.tip),
+      });
+      material.userData.fur = coat;
+      material.customProgramCacheKey = () => `wolf-fur-${gain.toFixed(2)}`;
+      material.onBeforeCompile = (shader) => {
+        shader.uniforms.uFurLength = { value: coat.length * gain };
+        shader.uniforms.uTip = { value: new THREE.Color(coat.tip) };
+        shader.uniforms.uBelly = { value: new THREE.Color(coat.belly) };
+        shader.vertexShader = `${FUR_NOISE}\nuniform float uFurLength;\nvarying vec3 vFurWorldNormal;\nvarying vec3 vFurObject;\n${shader.vertexShader}`;
+        shader.vertexShader = shader.vertexShader.replace(
+          '#include <begin_vertex>',
+          `#include <begin_vertex>
+          float furCoarse = furSnoise(transformed * 4.5);
+          float furFine = furSnoise(vec3(transformed.x * 3.0, transformed.y * 10.0, transformed.z * 3.0));
+          float furMask = clamp(0.35 + 0.45 * furCoarse + 0.25 * furFine, 0.0, 1.0);
+          transformed += objectNormal * (uFurLength * furMask);
+          vFurObject = transformed;
+          vFurWorldNormal = normalize(mat3(modelMatrix) * objectNormal);`,
+        );
+        shader.fragmentShader = `${FUR_NOISE}\nuniform vec3 uTip;\nuniform vec3 uBelly;\nvarying vec3 vFurWorldNormal;\nvarying vec3 vFurObject;\n${shader.fragmentShader}`;
+        shader.fragmentShader = shader.fragmentShader.replace(
+          '#include <color_fragment>',
+          `#include <color_fragment>
+          float streak = furSnoise(vec3(vFurObject.x * 2.2, vFurObject.y * 6.5, vFurObject.z * 2.2));
+          vec3 coatColor = mix(diffuseColor.rgb, uTip, smoothstep(0.05, 0.75, streak) * 0.62);
+          float under = smoothstep(-0.2, -0.8, vFurWorldNormal.y);
+          diffuseColor.rgb = mix(coatColor, uBelly, under);`,
+        );
+      };
+      return material;
+    }
+
+    function furNoise(x, y) {
+      const value = Math.sin(x * 127.1 + y * 311.7) * 43758.5453;
+      return value - Math.floor(value);
+    }
+
+    function cssHex(value) {
+      return `#${value.toString(16).padStart(6, '0')}`;
+    }
+
+    function mixHex(base, tip, amount) {
+      const channels = [16, 8, 0].map((shift) => {
+        const from = (base >> shift) & 255;
+        const to = (tip >> shift) & 255;
+        return Math.round(from * (1 - amount) + to * amount).toString(16).padStart(2, '0');
+      });
+      return `#${channels.join('')}`;
+    }
+
+    function furMaps(baseHex, tipHex, pattern) {
+      const size = 256;
+      const colorCanvas = document.createElement('canvas');
+      const bumpCanvas = document.createElement('canvas');
+      colorCanvas.width = size;
+      colorCanvas.height = size;
+      bumpCanvas.width = size;
+      bumpCanvas.height = size;
+      const ctx = colorCanvas.getContext('2d');
+      const bump = bumpCanvas.getContext('2d');
+      ctx.fillStyle = cssHex(baseHex);
+      ctx.fillRect(0, 0, size, size);
+      if (pattern === 'agouti') {
+        const fade = ctx.createLinearGradient(0, 0, 0, size);
+        fade.addColorStop(0, cssHex(baseHex));
+        fade.addColorStop(1, cssHex(tipHex));
+        ctx.fillStyle = fade;
+        ctx.fillRect(0, 0, size, size);
+      } else if (pattern === 'brindle') {
+        ctx.fillStyle = cssHex(tipHex);
+        for (let mark = 0; mark < 18; mark += 1) {
+          const x = furNoise(mark, 1) * size;
+          const y = furNoise(mark, 2) * size;
+          ctx.fillRect(x, y, 28 + furNoise(mark, 3) * 48, 9);
+        }
+      } else if (pattern === 'patch') {
+        ctx.fillStyle = cssHex(tipHex);
+        for (let blot = 0; blot < 5; blot += 1) {
+          ctx.beginPath();
+          ctx.ellipse((blot * 97) % size, (blot * 61) % size, 46, 34, 0.4, 0, Math.PI * 2);
+          ctx.fill();
+        }
+      }
+      ctx.globalAlpha = 0.28;
+      for (let x = 1; x < size; x += 3) {
+        const n = furNoise(x, 5);
+        ctx.strokeStyle = mixHex(baseHex, tipHex, 0.55 + n * 0.4);
+        ctx.lineWidth = 1;
+        ctx.beginPath();
+        ctx.moveTo(x, 0);
+        ctx.lineTo(x + (n - 0.5) * 4, size);
+        ctx.stroke();
+      }
+      ctx.globalAlpha = 1;
+      bump.fillStyle = '#808080';
+      bump.fillRect(0, 0, size, size);
+      bump.strokeStyle = '#d0d0d0';
+      bump.lineWidth = 1;
+      for (let x = 0; x < size; x += 3) {
+        bump.beginPath();
+        bump.moveTo(x, 0);
+        bump.lineTo(x + (furNoise(x, 2) - 0.5) * 3, size);
+        bump.stroke();
+      }
+      const colorMap = new THREE.CanvasTexture(colorCanvas);
+      const bumpMap = new THREE.CanvasTexture(bumpCanvas);
+      colorMap.colorSpace = THREE.SRGBColorSpace;
+      colorMap.wrapS = colorMap.wrapT = THREE.RepeatWrapping;
+      bumpMap.wrapS = bumpMap.wrapT = THREE.RepeatWrapping;
+      colorMap.needsUpdate = true;
+      bumpMap.needsUpdate = true;
+      return { color: colorMap, alpha: bumpMap };
+    }
+
+    function clonedRepeat(texture, repeat) {
+      const copy = texture.clone();
+      copy.wrapS = copy.wrapT = THREE.RepeatWrapping;
+      copy.repeat.set(repeat, repeat);
+      copy.needsUpdate = true;
+      return copy;
+    }
+
+    function dressFur(material, geometry, maps) {
+      geometry.computeBoundingBox();
+      const size = geometry.boundingBox.getSize(new THREE.Vector3());
+      const span = Math.max(size.x, size.y, size.z, 0.05);
+      const repeat = Math.min(5, Math.max(1, span / 0.55));
+      const colorMap = clonedRepeat(maps.color, repeat);
+      colorMap.colorSpace = THREE.SRGBColorSpace;
+      material.map = colorMap;
+      material.color.setHex(0xffffff);
+      material.roughness = Math.max(material.roughness, 0.85);
+      material.metalness = 0;
+      material.bumpMap = clonedRepeat(maps.alpha, repeat);
+      material.bumpScale = 0.02;
+    }
+
+    function furGeometry(spec) {
+      const copy = Object.assign({}, spec);
+      if (copy.type === 'capsule') {
+        copy.capSegments = Math.max(Number(copy.capSegments) || 2, 4);
+        copy.radialSegments = Math.max(Number(copy.radialSegments) || 6, 12);
+      } else if (copy.type === 'cylinder' || copy.type === 'cone') {
+        copy.radialSegments = Math.max(Number(copy.radialSegments) || 8, 12);
+      } else if (copy.type === 'sphere') {
+        copy.widthSegments = Math.max(Number(copy.widthSegments) || 8, 12);
+        copy.heightSegments = Math.max(Number(copy.heightSegments) || 6, 8);
+      }
+      return makeGeometry(copy);
+    }
+
+    function applyRotation(object, rotation) {
+      if (rotation == null) return;
+      if (!rotation || typeof rotation !== 'object' || rotation.unit !== 'degrees') throw new Error(BUILD_ERROR);
+      object.rotation.set(
+        THREE.MathUtils.degToRad(need(rotation.x, -180, 180)),
+        THREE.MathUtils.degToRad(need(rotation.y, -180, 180)),
+        THREE.MathUtils.degToRad(need(rotation.z, -180, 180)),
+      );
+    }
+
+    function place(object, part) {
+      const position = vec(part.position, -12, 12);
+      object.position.set(position[0], position[1], position[2]);
+      applyRotation(object, part.rotation);
+    }
+
+    function release(object) {
+      const textures = new Set();
+      const maps = object.userData && object.userData.furTextures;
+      if (Array.isArray(maps)) maps.forEach((texture) => textures.add(texture));
+      object.traverse((node) => {
+        if (node.geometry) node.geometry.dispose();
+        const list = node.material ? (Array.isArray(node.material) ? node.material : [node.material]) : [];
+        list.forEach((material) => {
+          if (material.map) textures.add(material.map);
+          if (material.alphaMap) textures.add(material.alphaMap);
+          if (material.bumpMap) textures.add(material.bumpMap);
+          material.dispose();
+        });
+      });
+      textures.forEach((texture) => texture.dispose());
+    }
+
+    function disposeRoot() {
+      while (root.children.length) {
+        const child = root.children[0];
+        root.remove(child);
+        release(child);
+      }
+      rig = null;
+      meshes = [];
+      currentParts = [];
+      selected = -1;
+    }
+
+    function jointNode(name) {
+      if (!rig) return null;
+      const entry = rig.nodes.get(name);
+      return entry ? entry.node : null;
+    }
+
+    function jointRest(name) {
+      if (!rig) return { x: 0, y: 0, z: 0 };
+      const entry = rig.nodes.get(name);
+      return entry ? entry.rest : { x: 0, y: 0, z: 0 };
+    }
+
+    function setArm(side, pose) {
+      const shoulderName = `SkeletonArm_${side}`;
+      const shoulder = jointNode(shoulderName);
+      if (!shoulder) return;
+      const base = jointRest(shoulderName);
+      shoulder.rotation.set(base.x + pose.sx, base.y + pose.sy, base.z + pose.sz);
+      const elbowName = `Forearm_${side}`;
+      const elbow = jointNode(elbowName);
+      if (elbow) elbow.rotation.x = jointRest(elbowName).x + pose.ex;
+      const wristName = `WristJoint_${side}`;
+      const wrist = jointNode(wristName);
+      if (wrist) wrist.rotation.x = jointRest(wristName).x + (pose.wx || 0);
+    }
+
+    function poseHumanoid(time) {
+      const scale = Number.isFinite(rig.scale) && rig.scale > 0 ? rig.scale : 1;
+      const leg = 2.48 * scale;
+      const speed = 3.6;
+      const amplitude = 0.3 + 0.4 * Math.min(1, speed / 10);
+      const phase = time * (speed * Math.PI) / (2 * leg * amplitude);
+      const hipAngle = gaitWave(phase) * amplitude;
+      const kneeBend = 1.3 * amplitude;
+      const swingCos = Math.cos(phase);
+      const pose = strikePose(time);
+      const fall = jointNode('fall');
+      if (fall) fall.position.y = rig.nodes.get('fall').homeY - leg * (1 - Math.cos(hipAngle)) * 0.9;
+      const spine = jointNode('spine');
+      if (spine) {
+        const base = jointRest('spine');
+        spine.rotation.set(base.x + pose.tx, base.y + pose.ty, base.z);
+      }
+      setArm('R', pose);
+      setArm('L', OFF);
+      const hipL = jointNode('Hip_L');
+      const hipR = jointNode('Hip_R');
+      if (hipL) hipL.rotation.x = jointRest('Hip_L').x + hipAngle;
+      if (hipR) hipR.rotation.x = jointRest('Hip_R').x - hipAngle;
+      const kneeL = jointNode('Knee_L');
+      const kneeR = jointNode('Knee_R');
+      if (kneeL) kneeL.rotation.x = jointRest('Knee_L').x + Math.max(0, -swingCos) * kneeBend;
+      if (kneeR) kneeR.rotation.x = jointRest('Knee_R').x + Math.max(0, swingCos) * kneeBend;
+    }
+
+    function poseQuadruped(time) {
+      const scale = Number.isFinite(rig.scale) && rig.scale > 0 ? rig.scale : 1;
+      const phase = time * 5;
+      const swing = gaitWave(phase) * 0.5;
+      const kneeBend = 0.7;
+      const body = jointNode('body');
+      if (body) body.position.y = rig.nodes.get('body').homeY + Math.abs(Math.sin(phase * 2)) * -0.04 * scale;
+      [['FL', 1], ['BR', 1], ['FR', -1], ['BL', -1]].forEach(([label, sign]) => {
+        const hip = jointNode(`Hip_${label}`);
+        const knee = jointNode(`Knee_${label}`);
+        if (hip) hip.rotation.x = jointRest(`Hip_${label}`).x + sign * swing;
+        if (knee) knee.rotation.x = jointRest(`Knee_${label}`).x + Math.max(0, -sign * Math.cos(phase)) * kneeBend;
+      });
+    }
+
+    function buildCreature(data) {
+      if (!data || typeof data !== 'object' || Array.isArray(data)) throw new Error('This file is not a creature.');
+      if (!Array.isArray(data.joints) || data.joints.length < 1 || data.joints.length > 40) throw new Error('This file is not a creature.');
+      if (!Array.isArray(data.parts) || data.parts.length < 1 || data.parts.length > 120) throw new Error('This file is not a creature.');
+      if (!data.materials || typeof data.materials !== 'object') throw new Error('This file has a material this viewer cannot use.');
+      const group = new THREE.Group();
+      const nodes = new Map();
+      const nextMeshes = [];
+      try {
+        data.joints.forEach((joint) => {
+          if (!joint || typeof joint !== 'object' || typeof joint.name !== 'string') throw new Error(BUILD_ERROR);
+          if (nodes.has(joint.name)) throw new Error(BUILD_ERROR);
+          const node = new THREE.Group();
+          node.name = joint.name;
+          const position = vec(joint.position, -12, 12);
+          node.position.set(position[0], position[1], position[2]);
+          const rest = { x: 0, y: 0, z: 0 };
+          if (joint.rotation != null) {
+            applyRotation(node, joint.rotation);
+            rest.x = node.rotation.x;
+            rest.y = node.rotation.y;
+            rest.z = node.rotation.z;
+          }
+          nodes.set(joint.name, { node, parent: joint.parent, rest, homeY: position[1] });
+        });
+        let roots = 0;
+        nodes.forEach((entry) => {
+          if (entry.parent == null) {
+            roots += 1;
+            group.add(entry.node);
+          } else {
+            const parent = nodes.get(entry.parent);
+            if (!parent) throw new Error(BUILD_ERROR);
+            parent.node.add(entry.node);
+          }
+        });
+        if (roots !== 1) throw new Error(BUILD_ERROR);
+        const furTextures = new Map();
+        data.parts.forEach((part, index) => {
+          if (!part || typeof part !== 'object') throw new Error(BUILD_ERROR);
+          const host = nodes.get(part.joint);
+          if (!host) throw new Error(BUILD_ERROR);
+          const material = materialFor(part.material, data.materials, part.name);
+          const coat = material.userData.fur;
+          const geometry = coat ? furGeometry(part.geometry) : makeGeometry(part.geometry);
+          if (coat && coat.belly === null) {
+            const key = `${coat.color}:${coat.tip}:${coat.pattern}`;
+            let maps = furTextures.get(key);
+            if (!maps) {
+              maps = furMaps(coat.color, coat.tip, coat.pattern);
+              furTextures.set(key, maps);
+            }
+            dressFur(material, geometry, maps);
+          }
+          const mesh = new THREE.Mesh(geometry, material);
+          place(mesh, part);
+          mesh.castShadow = true;
+          mesh.receiveShadow = true;
+          mesh.userData.partIndex = index;
+          nextMeshes[index] = mesh;
+          host.node.add(mesh);
+        });
+        group.userData.furTextures = Array.from(furTextures.values()).flatMap((maps) => [maps.color, maps.alpha]);
+        const socket = nodes.get('HandSocket_R');
+        if (socket && Array.isArray(data.weapons) && data.weapons.length) {
+          const stand = new THREE.Group();
+          stand.rotation.x = Math.PI / 2;
+          const blade = new THREE.Mesh(
+            new THREE.BoxGeometry(0.07, 1.2, 0.1),
+            new THREE.MeshStandardMaterial({ color: 0xb7c0c8, roughness: 0.35, metalness: 0.8 }),
+          );
+          blade.position.y = 0.75;
+          stand.add(blade);
+          socket.node.add(stand);
+        }
+      } catch (error) {
+        release(group);
+        throw error;
+      }
+      const scale = Number(data.scale);
+      return {
+        group,
+        nodes,
+        meshes: nextMeshes,
+        parts: data.parts,
+        scale: Number.isFinite(scale) ? scale : 1,
+        plan: data.plan === 'quadruped' ? 'quadruped' : 'humanoid',
+      };
+    }
+
+    function resize() {
+      const width = Math.max(1, view.clientWidth);
+      const height = Math.max(1, view.clientHeight);
+      camera.aspect = width / height;
+      camera.updateProjectionMatrix();
+      renderer.setSize(width, height, false);
+    }
+
+    function frame() {
+      resize();
+      const box = new THREE.Box3().setFromObject(root);
+      if (box.isEmpty()) return;
+      const size = box.getSize(new THREE.Vector3());
+      const center = box.getCenter(new THREE.Vector3());
+      const radius = Math.max(size.x, size.y, size.z, 0.5) * 0.62;
+      const distance = radius / Math.tan(THREE.MathUtils.degToRad(camera.fov) / 2);
+      grid.position.y = Math.min(0, box.min.y);
+      controls.target.copy(center);
+      camera.position.set(center.x + distance * 0.55, center.y + distance * 0.22, center.z + distance);
+      camera.near = Math.max(0.02, distance / 80);
+      camera.far = Math.max(40, distance * 12);
+      camera.updateProjectionMatrix();
+      controls.update();
+    }
+
+    function textOf(value) {
+      if (value == null) return '';
+      return String(value).slice(0, 48);
+    }
+
+    function showFacts(data) {
+      const lines = [
+        `species  ${textOf(data.species)}`,
+        `plan  ${textOf(data.plan)}`,
+        `scale  ${textOf(data.scale)}`,
+      ];
+      const stats = data.stats && typeof data.stats === 'object' ? data.stats : null;
+      if (stats) {
+        ['health', 'damage', 'moveSpeed', 'wanderFactor', 'radius', 'sightRange', 'windup', 'recover', 'minWindup', 'minRecover'].forEach((key) => {
+          if (Object.prototype.hasOwnProperty.call(stats, key)) lines.push(`${key}  ${textOf(stats[key])}`);
+        });
+      }
+      if (Array.isArray(data.weapons)) {
+        const ids = data.weapons.map((weapon) => textOf(weapon && weapon.id)).filter((id) => id);
+        lines.push(`weapons  ${ids.join(', ')}`);
+      }
+      const fur = data.materials && data.materials.fur;
+      if (fur && typeof fur === 'object' && fur.length != null && fur.pattern != null) {
+        lines.push(`fur  ${textOf(fur.pattern)}  ${textOf(fur.length)}`);
+      }
+      facts.textContent = lines.join('\n');
+    }
+
+    function partLabel(part, index) {
+      const name = typeof part.name === 'string' && part.name.length > 0 ? part.name.slice(0, 24) : `Part ${index + 1}`;
+      const joint = typeof part.joint === 'string' ? part.joint.slice(0, 16) : '';
+      return joint ? `${name}  ${joint}` : name;
+    }
+
+    function select(index) {
+      selected = index;
+      buttons.forEach((button, buttonIndex) => {
+        if (buttonIndex === index) button.setAttribute('aria-current', 'true');
+        else button.removeAttribute('aria-current');
+      });
+      meshes.forEach((mesh) => {
+        if (!mesh || !mesh.material || !mesh.material.emissive) return;
+        mesh.material.emissive.setHex(0x000000);
+        mesh.material.emissiveIntensity = 0;
+      });
+      const chosen = meshes[index];
+      if (chosen && chosen.material && chosen.material.emissive) {
+        chosen.material.emissive.setHex(0xf59e0b);
+        chosen.material.emissiveIntensity = 0.55;
+      }
+      if (index >= 0 && currentParts[index]) {
+        hint.classList.add('hidden');
+        detail.textContent = JSON.stringify(currentParts[index], null, 2);
+      } else {
+        hint.classList.remove('hidden');
+        detail.textContent = '';
+      }
+    }
+
+    function showParts() {
+      partsList.replaceChildren();
+      buttons = currentParts.map((part, index) => {
+        const button = document.createElement('button');
+        button.type = 'button';
+        button.textContent = partLabel(part, index);
+        button.addEventListener('click', () => select(index));
+        partsList.appendChild(button);
+        return button;
+      });
+      select(-1);
+    }
+
+    function showName(data) {
+      const name = typeof data.name === 'string' && data.name.length > 0 ? data.name.slice(0, 80) : 'Creature';
+      creatureName.textContent = name;
+      document.title = name;
+    }
+
+    function applyData(data) {
+      let built;
+      try {
+        built = buildCreature(data);
+      } catch (error) {
+        const known = error instanceof Error && error.message.startsWith('This file');
+        status.textContent = known ? error.message : 'This file could not be drawn.';
+        return;
+      }
+      disposeRoot();
+      root.add(built.group);
+      rig = built;
+      meshes = built.meshes;
+      currentParts = built.parts;
+      status.textContent = '';
+      showName(data);
+      showFacts(data);
+      showParts();
+      frame();
+    }
+
+    function applyText(text) {
+      let data;
+      try {
+        data = JSON.parse(text);
+      } catch (error) {
+        status.textContent = 'That text is not valid JSON.';
+        return;
+      }
+      applyData(data);
+    }
+
+    function readFile(file) {
+      if (!file) return;
+      const reader = new FileReader();
+      reader.onload = () => applyText(String(reader.result));
+      reader.onerror = () => { status.textContent = 'That file could not be read.'; };
+      reader.readAsText(file);
+    }
+
+    document.getElementById('sample').addEventListener('click', () => {
+      applyText(document.getElementById('sample-creature').textContent);
+    });
+    document.getElementById('file').addEventListener('change', (event) => {
+      const input = event.target;
+      readFile(input.files && input.files[0]);
+      input.value = '';
+    });
+    document.getElementById('togglePaste').addEventListener('click', () => {
+      document.getElementById('drawer').classList.toggle('open');
+    });
+    document.getElementById('apply').addEventListener('click', () => {
+      applyText(document.getElementById('paste').value);
+    });
+    window.addEventListener('dragover', (event) => event.preventDefault());
+    window.addEventListener('drop', (event) => {
+      event.preventDefault();
+      const file = event.dataTransfer && event.dataTransfer.files && event.dataTransfer.files[0];
+      readFile(file);
+    });
+
+    const raycaster = new THREE.Raycaster();
+    const pointer = new THREE.Vector2();
+    let down = null;
+    renderer.domElement.addEventListener('pointerdown', (event) => { down = [event.clientX, event.clientY]; });
+    renderer.domElement.addEventListener('pointerup', (event) => {
+      if (!down) return;
+      const dx = event.clientX - down[0];
+      const dy = event.clientY - down[1];
+      down = null;
+      if (dx * dx + dy * dy > 9) return;
+      const rect = renderer.domElement.getBoundingClientRect();
+      pointer.x = ((event.clientX - rect.left) / rect.width) * 2 - 1;
+      pointer.y = -((event.clientY - rect.top) / rect.height) * 2 + 1;
+      raycaster.setFromCamera(pointer, camera);
+      const hits = raycaster.intersectObjects(root.children, true);
+      if (!hits.length) {
+        select(-1);
+        return;
+      }
+      let node = hits[0].object;
+      while (node && node.userData.partIndex === undefined && node.parent) node = node.parent;
+      if (node && node.userData.partIndex !== undefined) select(node.userData.partIndex);
+    });
+
+    window.addEventListener('resize', resize);
+    function animate(time) {
+      if (rig) {
+        if (rig.plan === 'quadruped') poseQuadruped(time * 0.001);
+        else poseHumanoid(time * 0.001);
+      }
+      controls.update();
+      renderer.render(scene, camera);
+      requestAnimationFrame(animate);
+    }
+    applyText(document.getElementById('sample-creature').textContent);
+    requestAnimationFrame(animate);
+  </script>
+</body>
+</html>

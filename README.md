@@ -2,7 +2,7 @@
 
 A Python generator that snaps dungeon blocks into the Ancient Ruins JSON used by the Harper's Row game (`../harpers-row`). The file has the same rooms, doors, arch, trail, trees, and zone transitions as `ancientRuinsData.json`, plus a floor height on every room so stairwells can stack stories. With `--hub` it writes a small starting hub instead, with one structure and named paths for the game to connect to other locations.
 
-The generator uses only the Python standard library. A second command, `equipment_gen`, writes held equipment. See [Equipment](#equipment).
+The generator uses only the Python standard library. A second command, `equipment_gen`, writes held equipment. A third, `creature_gen`, writes creatures on the Harper's Row skeletal warrior template. See [Equipment](#equipment) and [Creatures](#creatures).
 
 ## Blocks
 
@@ -93,7 +93,7 @@ The grip sits near the origin and the working end runs toward `+Y`. The right ha
 
 Each part is a closed shape: `box`, `cylinder`, `sphere`, `cone`, `torus`, `plane`, `lathe`, `tube`, `blade`, or `shield`. A `blade` is a tapered diamond section. A `shield` is a `round`, `heater`, or `tower` face. A `tube` is a quadratic curve, used for the bow stave and string. A socket is a part with `type: group` and no mesh. Only that socket may carry `vfx` and `light`, and on a torch those two objects are the campfire flame from `blk_dungeon_gen/fire.py`.
 
-`equipment.html` is a standalone preview, on the same pattern as the dungeon viewer. It has no build step. Open it in a browser, and it shows a built-in sword. Upload a file, drop one onto the page, or open **JSON**, paste a recipe, and apply it. Drag to orbit, scroll to zoom, and right-drag to pan. The part list and a click on the mesh show that part's JSON. A torch draws the point light and a small flame at `TorchTipSocket`. The particle system itself is left for the game. A file that is not valid JSON shows an error and leaves the current item in place.
+`equipment-visualizer.html` is a standalone preview, on the same pattern as the dungeon viewer. It has no build step. Open it in a browser, and it shows a built-in sword. Upload a file, drop one onto the page, or open **JSON**, paste a recipe, and apply it. Drag to orbit, scroll to zoom, and right-drag to pan. The part list and a click on the mesh show that part's JSON. A torch draws the point light and a small flame at `TorchTipSocket`. The particle system itself is left for the game. A file that is not valid JSON shows an error and leaves the current item in place.
 
 If the view shows a blank page because the browser blocked a module load from `file://`, serve the folder:
 
@@ -101,14 +101,46 @@ If the view shows a blank page because the browser blocked a module load from `f
 python -m http.server 8000
 ```
 
-Then browse to `http://localhost:8000/equipment.html`.
+Then browse to `http://localhost:8000/equipment-visualizer.html`.
+
+## Creatures
+
+`creature_gen` writes one creature. The `stats` object uses the same fields as Harper's Row `content/creatures/skeletelWarrior.json`: `health`, `damage`, `moveSpeed`, `wanderFactor`, `radius`, `sightRange`, `windup`, `recover`, `minWindup`, and `minRecover`. A humanoid also has `weapons`. Each weapon id is `sword`, `mace`, `hammer`, or `bow`, with a range. The game reads those fields for the skeletal warrior. Joints and parts are stored beside them, in game units (3.2 units to a metre), for the preview.
+
+```bash
+python -m creature_gen --seed 1 --species skeleton -o out/skeleton.json
+python -m creature_gen --seed 1 --all -o out/creatures
+```
+
+| Option | Default | Meaning |
+| --- | --- | --- |
+| `--seed` | `1` | Creature seed, zero or greater. |
+| `--species` | required | `skeleton`, `human`, `goblin`, `orc`, `elf`, `dwarf`, `zombie`, `wolf`, `bear`, `boar`, `horse`, `deer`, or `rat`. |
+| `--all` | off | Write every species into the `-o` directory, one `<species>.json` each. |
+| `-o`, `--output` | required | JSON file to write, or a directory with `--all`. |
+
+The same seed and species always write the same file. Those two values are stored in `options`. The seed changes colours and extra meshes such as hair and cloth. On a quadruped it also changes the fur colour, the tip colour, the pattern, and the fur length. Humanoid joint positions stay on the skeletal warrior rig multiplied by `scale`. Scale 1 matches the game: the pelvis is at y `2.95`, the spine joint at y `3.05`, the skull at y `1.16`, and the hips at y `2.9`. `+Y` is up and the figure faces `+Z`.
+
+Humanoids are `skeleton`, `human`, `goblin`, `orc`, `elf`, `dwarf`, and `zombie`. They share `fall`, `spine`, `skull`, `SkeletonArm_R` and `SkeletonArm_L`, `Forearm_R` and `Forearm_L`, `WristJoint_R` and `WristJoint_L`, `HandSocket_R` and `HandSocket_L`, `Hip_L` and `Hip_R`, and `Knee_L` and `Knee_R`. A skeleton is bone, with ember eyes and an iron scrap, and has no skin or hair. A human has skin, hair, and clothes. A goblin is shorter, with large ears and rags. The hand sockets are empty. Weapon meshes stay in the game, which seats them on those sockets.
+
+Quadrupeds are `wolf`, `bear`, `boar`, `horse`, `deer`, and `rat`. Scale is 1, and the body is measured in metres times 3.2. A horse stands about 1.6 m at the withers, with a 2.4 m torso. A rat stands about 0.1 m, with a 0.25 m torso. The torso is two capsules along `Z`: a broader chest and a narrower pelvis. The neck is a cylinder, wider at the shoulder, pitched forward and up. The head is a capsule, with a jaw capsule, a snout cone, two ear cones, and a pair of inset eye spheres. Each leg has `Hip_*`, `Knee_*`, and `Ankle_*` for `FL`, `FR`, `BL`, and `BR`, and the parts are an upper bone, a lower bone, a cannon, and a foot. The hind lower bone sets the hock back. A hoof uses the socket material, and a paw uses fur. The tail is a chain of capsules on `tail`, drooping toward the ground. A horse adds a mane of draped capsules. A deer has antlers and a boar has tusks. They have fur and omit `weapons`, so the current Harper's Row loader would reject one of these files in place of the skeletal warrior. The `fur` material adds `length` (game units), `tip` (`#rrggbb`), and `pattern` (`solid`, `agouti`, `brindle`, or `patch`). Length starts from the species coat, about 10 cm for a bear, 1.8 cm for a horse, and 0.6 cm for a rat, then the seed scales it between 0.65 and 1.35. The preview paints a strand texture on the other coats. A wolf coat carries `belly` as well, and the preview displaces that fur with simplex noise — longer on the neck, belly, and tail — using a rough non-metallic shader and a soft sheen. There is no outer shell. Hooves, eyes, antlers, and tusks stay smooth. A wolf carries its head low: the neck pitches past horizontal, the chest is a deep barrel, the abdomen tucks up into a lean pelvis, the hind hock sits low, and the tail is thick at the base and hangs.
+
+`creature-visualizer.html` is a standalone preview, on the same pattern as the equipment viewer. It has no build step. Open it in a browser, and it shows a built-in skeletal warrior. Upload a file, drop one onto the page, or open **JSON**, paste a creature, and apply it. Drag to orbit, scroll to zoom, and right-drag to pan. The figure walks. A humanoid also plays a strike, using the same joint rotations as the game: torso `tx` and `ty`, shoulder `sx`, `sy`, and `sz`, elbow `ex`, wrist `wx`, hip and knee x, and the fall bob. A quadruped trots. The part list and a click on the mesh show that part's JSON. The sidebar shows species, scale, stats, and weapons. A stand-in blade in the right hand is drawn for a humanoid and is not written into the file. A file that is not valid JSON shows an error and leaves the current creature in place.
+
+If the view shows a blank page because the browser blocked a module load from `file://`, serve the folder:
+
+```bash
+python -m http.server 8000
+```
+
+Then browse to `http://localhost:8000/creature-visualizer.html`.
 
 ## View a layout
 
-`index.html` is a standalone viewer called Dungeon Cartographer. Use it to look at the JSON this generator writes, with no game needed. It has no build step and no install.
+`dungeon-visualizer.html` is a standalone viewer called Dungeon Cartographer. Use it to look at the JSON this generator writes, with no game needed. It has no build step and no install.
 
 1. Generate a layout, for example `python -m blk_dungeon_gen --seed 1 --floors 2 --chambers 8 -o out/ruins.json`.
-2. Open `index.html` in a modern browser. Double-clicking the file is enough, and no web server is needed.
+2. Open `dungeon-visualizer.html` in a modern browser. Double-clicking the file is enough, and no web server is needed.
 3. Load your file with any of these:
    - **Upload .json** in the top bar.
    - Drag the file anywhere onto the page.
@@ -137,7 +169,7 @@ If the 3D view shows "3D view could not start" (some browsers or privacy extensi
 python -m http.server 8000
 ```
 
-Then browse to `http://localhost:8000/index.html`.
+Then browse to `http://localhost:8000/dungeon-visualizer.html`.
 
 ## Test
 
