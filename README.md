@@ -2,7 +2,7 @@
 
 A Python generator that snaps dungeon blocks into the Ancient Ruins JSON used by the Harper's Row game (`../harpers-row`). The file has the same rooms, doors, arch, trail, trees, and zone transitions as `ancientRuinsData.json`, plus a floor height on every room so stairwells can stack stories. With `--hub` it writes a small starting hub instead, with one structure and named paths for the game to connect to other locations.
 
-The generator uses only the Python standard library. A second command, `equipment_gen`, writes held equipment. A third, `creature_gen`, writes creatures on the Harper's Row skeletal warrior template. See [Equipment](#equipment) and [Creatures](#creatures).
+The generator uses only the Python standard library. A second command, `equipment_gen`, writes held equipment. A third, `creature_gen`, writes creatures on the Harper's Row skeletal warrior template. A window, `dungeon_gui`, drives all three. See [Equipment](#equipment), [Creatures](#creatures), and [Studio](#studio).
 
 ## Blocks
 
@@ -29,24 +29,39 @@ python -m blk_dungeon_gen --seed 1 --floors 2 --chambers 8 --density normal --cl
 | `--chambers` | `8` | Counts the entrance, the exit, hubs, and other rooms, 2 to 30. Hallways, doorways, and stairwells are added as the links between them. |
 | `--density` | `normal` | Enemy spawns: `low`, `normal`, or `high`. |
 | `--clutter` | `0.5` | Room props and outdoor scenery, from `0` (none) to `1` (most). |
+| `--theme` | mixed | `stone`, `wood`, or `cave`. Forces every room, including passages. Without it, chambers mix the three and passages stay stone. |
+| `--creature` | unset | A species from [Creatures](#creatures), such as `wolf` or `goblin`. Every ruin spawn is that creature. |
 | `--hub` | off | Write a starting hub instead of ruins. See [Hub](#hub). `--floors`, `--chambers`, and `--density` are ignored in this mode. |
 | `--structure` | from the seed | Hub only: `hut`, `house`, `tent`, `campfire`, or `castle`. |
 | `--spokes` | `3` | Hub only: number of paths leaving the hub, 1 to 8. Defaults to the number of `--spoke` names when you give any. |
 | `--spoke` | none | Hub only: name a path, for example `--spoke ruins`. Repeat it for more paths. |
 | `-o`, `--output` | required | JSON file to write. |
 
-The same seed and the same options always write the same file, so keep the options with the seed if you want to regenerate a file. Changing `--density` or `--clutter` leaves the rooms, doors, themes, sconces, and trees where they were. Only the spawns, props, and scenery change.
+```bash
+python -m blk_dungeon_gen --seed 1 --floors 2 --theme stone --creature wolf -o out/ruins.json
+python -m blk_dungeon_gen --hub --seed 1 --structure house --theme wood -o out/hub.json
+```
+
+The same seed and the same options always write the same file, so keep the options with the seed if you want to regenerate a file. Changing `--density` or `--clutter` leaves the rooms, doors, themes, sconces, and trees where they were. Only the spawns, props, and scenery change. Changing `--creature` records a different species and leaves the layout where it was. Changing `--theme` keeps the rooms, doors, and sconces, and changes chamber names, props, and cave rocks.
+
+### Theme
+
+`--theme` is `stone`, `wood`, or `cave`. It dresses every room, including passages, the antechamber, and stairwells. Chamber names and props follow that theme. Only `cave` rooms keep `rocks`. Without `--theme`, fought chambers mix stone, wood, and cave, and passages, the antechamber, and stairwells stay stone. `options.theme` is the forced theme, or `null` when the rooms are mixed.
+
+On a hub, `--theme` changes the interior. `wood` uses timber walls, except when the structure was already wood: a tent stays canvas and a campfire stays logs. `stone` and `cave` use stone walls. A cave interior gets cave props. `options.theme` is `null` when you leave the structure's own theme in place.
 
 ### Enemies
 
-Each chamber starts from a count based on its size, scaled by `--density` (low 0.5, normal 1, high 1.5). The count then scales with depth: rooms next to the entrance get about 0.75 times as many, and the deepest room about 1.25 times. Every chamber except the entrance keeps at least one spawn, and the exit gets one extra guard. Long hallways can hold a spawn too. The entrance, doorways, and stairwells never do. Spawns are `[x, z]` points in each room's `spawns`; the game picks what appears.
+Each chamber starts from a count based on its size, scaled by `--density` (low 0.5, normal 1, high 1.5). The count then scales with depth: rooms next to the entrance get about 0.75 times as many, and the deepest room about 1.25 times. Every chamber except the entrance keeps at least one spawn, and the exit gets one extra guard. Long hallways can hold a spawn too. The entrance, doorways, and stairwells never do. Spawns are `[x, z]` points in each room's `spawns`.
+
+`--creature` names the species for every spawn. It is one of the `creature_gen` roster: `skeleton`, `human`, `goblin`, `orc`, `elf`, `dwarf`, `zombie`, `wolf`, `bear`, `boar`, `horse`, `deer`, or `rat`. The file stores that id in `options.creature` and the species title in `enemyName` (for example `Wolf`). Without `--creature`, `options.creature` is `null`, there is no `enemyName`, and the game picks what appears. The viewer then labels the spawns Skeletal Warrior. A hub can record `--creature` the same way, and it still has no enemy spawns.
 
 ### Props and outdoor scenery
 
 - **Room props** — each chamber has a `props` list of `{type, x, z, rotationY, scale}`. The type follows the room's theme: urns, caskets, broken pillars, and rubble for stone; barrels, crates, shelves, and plank piles for wood; stalagmites, bone piles, and rubble for cave. `rotationY` is a yaw in radians where 0 faces +Z. Wall props face into the room. Props keep clear of doors, the walkway between doors, spawns, the chest, and the sconce. Cave rooms keep their `rocks`.
 - **Fire** — a wall sconce and a campfire pit carry the same flame, so the game can spawn it. `vfx` is a particle system (`preset`, `emitter` rate, lifetime, colours, and blend mode) and `light` is a flickering point light (colour, intensity, distance). There is one flame, not a small or large variant. A sconce is still `{x, z, nx, nz}` plus that flame. The campfire pit also has `y`, `radius`, and `prefab`.
 - **The approach** — the trail's bend direction and amount, its length, and the tree count all change with the seed. A top-level `scenery` list holds ruin dressing in one of four moods, named in `approach.dressing`: `overgrown`, `graveyard`, `fallen-hall`, or `abandoned-camp`. Scenery stays out of the trail and the arch's door lane.
-- **Options** — the top-level `options` object records the `density` and `clutter` used.
+- **Options** — the top-level `options` object records the `density`, `clutter`, `theme`, and `creature` used. `theme` and `creature` are `null` when you do not pass those flags.
 
 The exit chamber has an `exitGate` on a wall that does not face another room. `exitArea` is an outdoor zone to the west of the ruins, built the same way as the entrance: a stone arch, a worn path, trees, shrubs and rocks, and a mountain vista. Fade transitions `ruin-leave` and `ruin-return` join the gate to that trail (`ruin-leave` carries `y` and `floor`, so the trigger sits on the exit chamber's story), and `exit-pass` continues toward the same distant pass as the entrance. The exit trail's zone ids are `exit-trail` and `exit-pass`.
 
@@ -66,7 +81,7 @@ python -m blk_dungeon_gen --hub --seed 1 --structure house --spoke ruins --spoke
 - **Names** — spoke names use lowercase letters, digits, and single hyphens, 1 to 32 characters, and must be unique. `hub` and `hub-interior` are reserved. Spokes without a name are called `spoke-1`, `spoke-2`, and so on. Bad names, counts, or structure types stop the run with an error.
 - **Transitions** — each spoke has two entries in `transitions`, in the same format as the ruin's transitions. `to-<name>` leaves the hub: `sourceZoneId` is `hub`, `targetZoneId` is the spoke name, `volume` is the trigger at the end of the path, and `targetSpawnPoint` is `null` for the game to fill in. `from-<name>` arrives from that location: `sourceZoneId` is the spoke name, `targetZoneId` is `hub`, `targetSpawnPoint` is a point on the path facing the plaza, and `volume` is `null` because the trigger belongs to the other zone. The enterable structures also have `structure-entry` and `structure-exit` between zones `hub` and `hub-interior`.
 - **Scenery** — `trees` and `scenery` surround the plaza and stay off the spokes. Each spoke has a `signpost` in `scenery` labelled with its name. `--clutter` scales the other scenery and the room props.
-- **Other fields** — the file also has `kind: 'hub'`, `areaName: 'The Hub'`, `floors: 1`, an empty `doors`, a `structure` object (type, roof, material, footprint, parts, door), and `options` with the `clutter`, `structure`, and `spokes` used. It has no `exterior`, `approach`, or `lastRoomId`.
+- **Other fields** — the file also has `kind: 'hub'`, `areaName: 'The Hub'`, `floors: 1`, an empty `doors`, a `structure` object (type, roof, material, footprint, parts, door), and `options` with the `clutter`, `structure`, `spokes`, `theme`, and `creature` used. It has no `exterior`, `approach`, or `lastRoomId`. `--theme` and `--creature` are the same flags as on a ruin. See [Theme](#theme) and [Enemies](#enemies).
 
 Forcing a different `--structure` changes more than the building. The plaza and the spokes are laid out around it, so they move too. The same seed, structure, and spoke names always write the same file.
 
@@ -135,6 +150,27 @@ python -m http.server 8000
 
 Then browse to `http://localhost:8000/creature-visualizer.html`.
 
+## Studio
+
+`dungeon_gui` is a window with four tabs: Dungeons, Hubs, Gear, and Creatures. Each tab has the same options as that generator's command line, and a Generate button. It calls the generators directly. It does not start a shell.
+
+```bash
+python -m dungeon_gui
+```
+
+Run it from the project folder. Files go into one folder per tab:
+
+- `out/dungeons`
+- `out/hubs`
+- `out/gear`
+- `out/creatures`
+
+The filename field starts from the options, for example `s1-f2-c8-normal-k0p5-stone-wolf.json`. It keeps updating until you edit it. The same options write the same file again. All kinds, or all species, writes one file per item into that tab's folder and ignores the filename field. A filename cannot leave its folder.
+
+The window opens tall enough to leave room under the form. After Generate, that space shows the file as simple blocks. Arrows on the sides turn it, and the arrow under the picture tilts it. There is no zoom. All kinds, or all species, previews the kind or species still selected in the list. The full-size viewers stay the HTML pages below.
+
+The window needs tkinter, which is part of the usual Python install on Windows. `out/` stays out of git.
+
 ## View a layout
 
 `dungeon-visualizer.html` is a standalone viewer called Dungeon Cartographer. Use it to look at the JSON this generator writes, with no game needed. It has no build step and no install.
@@ -159,7 +195,7 @@ A file that is not valid JSON shows an error message and leaves the current map 
 - **Navigate** — drag to pan, scroll or use the `+` and `-` buttons to zoom, and press `Space` or **Fit Map** to frame the whole layout.
 - **Inspect** — click a room, door, or other entity to see its position, elevation (`y`), size, attributes, and raw JSON in the right panel. **Copy** copies that JSON fragment, and **Focus Camera** centres on it. `Esc` clears the selection.
 - **Search** — type in the top search box to jump to a room or entity by name.
-- **Layers** — toggle rooms, outdoor trail, sky and horizon, doors and gates, torches, chests, enemies, props and scenery, spawns and triggers, and grid lines. The stats box counts props and scenery together, and the header shows the `density` and `clutter` the file was made with.
+- **Layers** — toggle rooms, outdoor trail, sky and horizon, doors and gates, torches, chests, enemies, props and scenery, spawns and triggers, and grid lines. The stats box counts props and scenery together. It also names the theme and the creature for the whole layout, and the enemy layer uses that creature name. The header shows the `density`, `clutter`, theme, and creature the file was made with. Wood and cave rooms are tinted in plan and in 3D. Stone rooms keep the blueprint colours. The entrance and the exit keep their green and gold outlines. Spawn markers use a colour for the creature, and at a close zoom the plan view prints the creature name on each one. A file with no `enemyName` and no `options.creature` still labels its spawns Skeletal Warrior. A file with no spawns and no creature says `unset`.
 
 The viewer runs entirely in the browser and does not upload your file anywhere. It does load Tailwind CSS, Three.js, Google Fonts, and Phosphor Icons from public CDNs, so it needs an internet connection the first time you open it.
 

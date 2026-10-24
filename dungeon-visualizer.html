@@ -187,7 +187,7 @@
           <input type="checkbox" id="layerChests" checked class="accent-amber-500 cursor-pointer">
         </label>
         <label class="flex items-center justify-between cursor-pointer hover:text-white">
-          <span class="flex items-center gap-1.5"><span class="w-2.5 h-2.5 rounded-sm bg-red-500"></span>Enemies & Boss</span>
+          <span class="flex items-center gap-1.5"><span class="w-2.5 h-2.5 rounded-sm bg-red-500"></span><span id="layerEnemiesLabel">Enemies</span></span>
           <input type="checkbox" id="layerEnemies" checked class="accent-amber-500 cursor-pointer">
         </label>
         <label class="flex items-center justify-between cursor-pointer hover:text-white">
@@ -225,8 +225,10 @@
 
       <!-- Quick stats preview -->
       <div class="mt-3 pt-2 border-t border-dungeon-800 text-[10px] text-slate-400 space-y-0.5">
+        <div class="flex justify-between"><span>Theme:</span><span id="statTheme" class="text-slate-200">—</span></div>
+        <div class="flex justify-between"><span>Creature:</span><span id="statCreature" class="text-slate-200">—</span></div>
         <div class="flex justify-between"><span>Rooms:</span><span id="statRooms" class="text-slate-200">0</span></div>
-        <div class="flex justify-between"><span>Skeletons:</span><span id="statEnemies" class="text-slate-200">0</span></div>
+        <div class="flex justify-between"><span>Enemies:</span><span id="statEnemies" class="text-slate-200">0</span></div>
         <div class="flex justify-between"><span>Chests:</span><span id="statChests" class="text-slate-200">0</span></div>
         <div class="flex justify-between"><span>Torches:</span><span id="statTorches" class="text-slate-200">0</span></div>
         <div class="flex justify-between"><span>Props:</span><span id="statProps" class="text-slate-200">0</span></div>
@@ -281,7 +283,7 @@
         <div id="inspectorEmptyState" class="text-center py-16 px-4">
           <i class="ph ph-cursor-click text-3xl text-slate-600 mb-2 block"></i>
           <p class="text-sm font-medium text-slate-400">No entity selected</p>
-          <p class="text-xs text-slate-500 mt-1">Click any room, skeleton, chest, or door on the map to inspect its data properties and coordinates.</p>
+          <p class="text-xs text-slate-500 mt-1">Click any room, creature, chest, or door on the map to inspect its data properties and coordinates.</p>
         </div>
 
         <!-- Populated Inspector Content (Hidden by default) -->
@@ -957,6 +959,107 @@
       return label.endsWith('s') ? label.slice(0, -1) : label;
     }
 
+    // Titles match creature_gen. An unknown id is shown as text and keeps the default marker colour.
+    const CREATURE_TITLES = {
+      skeleton: 'Skeletal Warrior',
+      human: 'Human',
+      goblin: 'Goblin',
+      orc: 'Orc',
+      elf: 'Elf',
+      dwarf: 'Dwarf',
+      zombie: 'Zombie',
+      wolf: 'Wolf',
+      bear: 'Bear',
+      boar: 'Boar',
+      horse: 'Horse',
+      deer: 'Deer',
+      rat: 'Rat'
+    };
+
+    const CREATURE_LOOK = {
+      skeleton: { fill: '#450a0a', stroke: '#f87171', hex: 0xb91c1c },
+      skeleton_warrior: { fill: '#450a0a', stroke: '#f87171', hex: 0xb91c1c },
+      human: { fill: '#1e3a5f', stroke: '#93c5fd', hex: 0x3b82f6 },
+      goblin: { fill: '#14532d', stroke: '#4ade80', hex: 0x16a34a },
+      orc: { fill: '#365314', stroke: '#a3e635', hex: 0x65a30d },
+      elf: { fill: '#134e4a', stroke: '#5eead4', hex: 0x0d9488 },
+      dwarf: { fill: '#78350f', stroke: '#fbbf24', hex: 0xd97706 },
+      zombie: { fill: '#3f6212', stroke: '#bef264', hex: 0x4d7c0f },
+      wolf: { fill: '#1f2937', stroke: '#e5e7eb', hex: 0x9ca3af },
+      bear: { fill: '#44403c', stroke: '#d6d3d1', hex: 0xa8a29e },
+      boar: { fill: '#431407', stroke: '#fdba74', hex: 0xc2410c },
+      horse: { fill: '#451a03', stroke: '#fcd34d', hex: 0xb45309 },
+      deer: { fill: '#78350f', stroke: '#fed7aa', hex: 0xd97706 },
+      rat: { fill: '#3f3f46', stroke: '#e4e4e7', hex: 0xa1a1aa }
+    };
+
+    // Stone keeps the blueprint colours. Wood and cave are tinted so a forced theme is visible.
+    const THEME_LOOK = {
+      wood: {
+        plan: '#2a1c12', border: '#b45309', floor: 0x5c4030, wall: 0x8a5a34,
+        corridorPlan: '#1c140e', corridorBorder: '#92400e', corridorFloor: 0x3f2c20, corridorWall: 0x6b4630
+      },
+      cave: {
+        plan: '#221e1a', border: '#a8a29e', floor: 0x44403c, wall: 0x78716c,
+        corridorPlan: '#161310', corridorBorder: '#78716c', corridorFloor: 0x292524, corridorWall: 0x57534e
+      }
+    };
+
+    function cleanLabel(value, fallback, limit = 40) {
+      const text = String(value ?? '').replace(/[\u0000-\u001f]/g, '').trim();
+      if (!text) return fallback;
+      return text.length > limit ? text.slice(0, limit) : text;
+    }
+
+    function safeSpeciesId(value) {
+      return /^[a-z0-9-]{1,32}$/.test(value) ? value : '';
+    }
+
+    function themeLook(theme) {
+      return THEME_LOOK[theme] || null;
+    }
+
+    function themeWallHex(covers) {
+      if (!covers || covers.length === 0) return null;
+      const host = covers.find((cover) => cover.room && cover.room.kind !== 'corridor') || covers[0];
+      const look = themeLook(host && host.room && host.room.theme);
+      if (!look) return null;
+      const passage = covers.every((cover) => cover.room && cover.room.kind === 'corridor');
+      return passage ? look.corridorWall : look.wall;
+    }
+
+    function creatureLook(type) {
+      return CREATURE_LOOK[type] || CREATURE_LOOK.skeleton_warrior;
+    }
+
+    function resolveCreature(raw) {
+      const recorded = raw && raw.options && typeof raw.options.creature === 'string'
+        ? safeSpeciesId(raw.options.creature.trim()) : '';
+      if (recorded && CREATURE_TITLES[recorded]) return { id: recorded, title: CREATURE_TITLES[recorded], explicit: true };
+      const named = cleanLabel(raw && raw.enemyName, '');
+      const fromTitle = Object.keys(CREATURE_TITLES).find((id) => CREATURE_TITLES[id].toLowerCase() === named.toLowerCase());
+      if (fromTitle) return { id: fromTitle, title: CREATURE_TITLES[fromTitle], explicit: true };
+      if (named) return { id: recorded, title: named, explicit: true };
+      return { id: 'skeleton', title: 'Skeletal Warrior', explicit: false };
+    }
+
+    function displayCreature(data) {
+      if (!data) return 'unset';
+      if (data.creatureExplicit) return cleanLabel(data.enemyName, 'Skeletal Warrior');
+      if (Array.isArray(data.enemies) && data.enemies.length > 0) return cleanLabel(data.enemyName, 'Skeletal Warrior');
+      return 'unset';
+    }
+
+    function layoutTheme(raw, rooms) {
+      const recorded = raw && raw.options && typeof raw.options.theme === 'string' ? raw.options.theme.trim() : '';
+      if (recorded === 'stone' || recorded === 'wood' || recorded === 'cave') return recorded;
+      const structureTheme = raw && raw.structure && typeof raw.structure.theme === 'string' ? raw.structure.theme : '';
+      if (structureTheme === 'stone' || structureTheme === 'wood' || structureTheme === 'cave') return structureTheme;
+      const themes = (rooms || []).map((room) => room.theme).filter((theme) => theme === 'stone' || theme === 'wood' || theme === 'cave');
+      if (themes.length === 0) return 'stone';
+      return themes.every((theme) => theme === themes[0]) ? themes[0] : 'mixed';
+    }
+
     function segmentDoor(door, index, roomNames) {
       const a = [num(door.a[0]), num(door.a[1])];
       const b = [num(door.b[0]), num(door.b[1])];
@@ -1053,7 +1156,8 @@
       const torches = [];
       const chests = [];
       const enemies = [];
-      const enemyName = singularEnemyName(raw.enemyName);
+      const creature = resolveCreature(raw);
+      const enemyName = singularEnemyName(creature.title);
       rooms.forEach((room) => {
         (Array.isArray(room.spawns) ? room.spawns : []).forEach((point, index) => {
           const x = Array.isArray(point) ? num(point[0]) : num(point?.x);
@@ -1061,7 +1165,7 @@
           enemies.push({
             id: `${room.id}-spawn-${index}`,
             name: enemyName,
-            type: 'skeleton_warrior',
+            type: creature.id || 'skeleton_warrior',
             x, y: room.floorY, z,
             floors: room.floors,
             room: room.id,
@@ -1409,7 +1513,10 @@
         author: raw.author || 'Extracted Game Map',
         version: raw.version || '1.0',
         layout: 'harper',
-        enemyName,
+        enemyName: creature.title,
+        creatureId: creature.id,
+        creatureExplicit: creature.explicit,
+        themeLabel: layoutTheme(raw, rooms),
         rooms,
         doors,
         torches,
@@ -1678,6 +1785,11 @@
         });
       }
 
+      const creature = resolveCreature(raw);
+      normalized.enemyName = creature.title;
+      normalized.creatureId = creature.id;
+      normalized.creatureExplicit = creature.explicit;
+      normalized.themeLabel = layoutTheme(raw, normalized.rooms);
       return normalized;
     }
 
@@ -1699,7 +1811,10 @@
     const cursorCoordX = document.getElementById('cursorCoordX');
     const cursorCoordZ = document.getElementById('cursorCoordZ');
     const statRooms = document.getElementById('statRooms');
+    const statTheme = document.getElementById('statTheme');
+    const statCreature = document.getElementById('statCreature');
     const statEnemies = document.getElementById('statEnemies');
+    const layerEnemiesLabel = document.getElementById('layerEnemiesLabel');
     const statChests = document.getElementById('statChests');
     const statTorches = document.getElementById('statTorches');
     const statProps = document.getElementById('statProps');
@@ -2104,6 +2219,14 @@
         }
 
         const marker = roomMarker(room);
+        const look = themeLook(room.theme);
+        if (look && !marker && room.tier !== 'boss_arena' && kind !== 'boss_arena') {
+          const passage = kind === 'corridor';
+          roomBg = passage ? look.corridorPlan : look.plan;
+          if (room.tier !== 'stairwell' && kind !== 'stairwell') {
+            borderColor = passage ? look.corridorBorder : look.border;
+          }
+        }
         if (marker) {
           roomBg = MARKER_STYLES[marker].fill;
           borderColor = MARKER_STYLES[marker].stroke;
@@ -2173,7 +2296,8 @@
           ctx.fillText(room.name || room.id || 'Room', center.x, center.y - 4);
           ctx.fillStyle = '#94a3b8';
           ctx.font = '9px "JetBrains Mono", monospace';
-          ctx.fillText(`Y: ${Number(floorY).toFixed(1)}m | ${bw.toFixed(1)}x${bd.toFixed(1)}m`, center.x, center.y + 10);
+          const themeName = cleanLabel(room.theme, 'stone', 16);
+          ctx.fillText(`Y: ${Number(floorY).toFixed(1)}m | ${bw.toFixed(1)}x${bd.toFixed(1)}m | ${themeName}`, center.x, center.y + 10);
         }
       });
       badges.forEach((badge) => drawMarkerBadge(badge.marker, badge.x, badge.y));
@@ -2497,8 +2621,11 @@
           ctx.fillText(`${enemy.hp ?? 400} HP`, s.x, s.y + 24);
         } else {
           const r = 6;
-          ctx.fillStyle = enemy.type === 'skeleton_archer' ? '#1e3a8a' : '#450a0a';
-          ctx.strokeStyle = enemy.type === 'skeleton_archer' ? '#60a5fa' : '#f87171';
+          const look = enemy.type === 'skeleton_archer'
+            ? { fill: '#1e3a8a', stroke: '#60a5fa' }
+            : creatureLook(enemy.type);
+          ctx.fillStyle = look.fill;
+          ctx.strokeStyle = look.stroke;
           ctx.lineWidth = 1.5;
 
           ctx.beginPath();
@@ -2510,6 +2637,13 @@
           ctx.beginPath();
           ctx.arc(s.x, s.y, 2, 0, Math.PI * 2);
           ctx.fill();
+
+          if (view.scale > 12 && enemy.name) {
+            ctx.fillStyle = '#fecaca';
+            ctx.font = '9px Inter, sans-serif';
+            ctx.textAlign = 'center';
+            ctx.fillText(cleanLabel(enemy.name, '', 40), s.x, s.y - 10);
+          }
         }
       });
       ctx.restore();
@@ -3051,12 +3185,18 @@
     function updateMetadataAndStats() {
       if (!dungeonData) return;
       const opts = dungeonData.options;
+      const theme = cleanLabel(dungeonData.themeLabel, 'stone', 16);
+      const creature = displayCreature(dungeonData);
       let optionText = opts ? ` • density ${String(opts.density ?? 'normal')}, clutter ${String(opts.clutter ?? '')}` : '';
       if (dungeonData.hub) {
         const spokes = Array.isArray(opts?.spokes) ? opts.spokes.length : dungeonData.hub.spokes.length;
         optionText = ` • ${dungeonData.hub.structure ? dungeonData.hub.structure.name : 'no structure'}, ${spokes} spokes, clutter ${String(opts?.clutter ?? '')}`;
       }
+      optionText += ` • theme ${theme}, creature ${creature}`;
       mapHeaderSubtitle.textContent = `${dungeonData.name || 'Unnamed Dungeon'} • ${dungeonData.rooms ? dungeonData.rooms.length : 0} Chambers${optionText}`;
+      statTheme.textContent = theme;
+      statCreature.textContent = creature;
+      layerEnemiesLabel.textContent = creature === 'unset' ? 'Enemies' : creature;
       statProps.textContent = (dungeonData.props ? dungeonData.props.length : 0) + (dungeonData.scenery ? dungeonData.scenery.length : 0);
       statRooms.textContent = dungeonData.rooms ? dungeonData.rooms.length : 0;
       statEnemies.textContent = dungeonData.enemies ? dungeonData.enemies.length : 0;
@@ -3399,7 +3539,8 @@
           });
         }
         const corridorOnly = group.covers.length > 0 && group.covers.every((cover) => cover.room.kind === 'corridor');
-        const color = corridorOnly ? 0x343c4c : 0x556276;
+        const themedWall = themeWallHex(group.covers);
+        const color = themedWall == null ? (corridorOnly ? 0x343c4c : 0x556276) : themedWall;
         const coverSpans = group.covers.map((cover) => [cover.t0, cover.t1]);
         for (const [t0, t1] of subtractIntervals(coverSpans, gaps.map((gap) => [gap.t0, gap.t1]))) {
           const [ax, az] = pointOnEdge(group, t0);
@@ -3837,6 +3978,10 @@
         rooms.forEach((room) => {
           const marker = roomMarker(room);
           let color = room.kind === 'corridor' ? 0x242b38 : (room.tier === 'boss_arena' ? 0x3a2228 : 0x31384a);
+          const look = themeLook(room.theme);
+          if (look && !marker && room.tier !== 'boss_arena' && room.kind !== 'stairwell') {
+            color = room.kind === 'corridor' ? look.corridorFloor : look.floor;
+          }
           if (marker) color = MARKER_STYLES[marker].floor;
           if (hubStyle) color = hubStyle.floorHex;
           const pick = { ...room, _kind: 'room' };
@@ -3945,7 +4090,7 @@
         (dungeonData.enemies || []).forEach((enemy) => {
           const mesh = new THREE.Mesh(
             new THREE.ConeGeometry(enemy.isBoss ? 0.55 : 0.28, enemy.isBoss ? 1.5 : 0.85, 8),
-            markerMaterial(enemy.isBoss ? 0xdc2626 : 0xb91c1c)
+            markerMaterial(enemy.isBoss ? 0xdc2626 : creatureLook(enemy.type).hex)
           );
           mesh.position.set(enemy.x, num(enemy.y) + (enemy.isBoss ? 0.75 : 0.42), enemy.z);
           mesh.userData.pick = { ...enemy, _kind: 'enemy' };
