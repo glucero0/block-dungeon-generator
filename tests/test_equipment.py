@@ -14,6 +14,10 @@ from equipment_gen.__main__ import main
 from equipment_gen.schema import validate
 
 
+def _part(item, name):
+    return next(part for part in item['parts'] if part['name'] == name)
+
+
 def _without_seed(item):
     copy = json.loads(json.dumps(item))
     copy['seed'] = 0
@@ -44,6 +48,39 @@ class EquipmentTests(unittest.TestCase):
             self.assertEqual(low['name'], high['name'])
             self.assertFalse(any(part['name'] == 'inlay' for part in low['parts']))
             self.assertTrue(any(part['name'] == 'inlay' for part in high['parts']))
+
+    def test_mesh_is_twice_as_large_except_the_torch(self):
+        for seed in (0, 1, 7):
+            sword = _part(generate_item('sword', seed, 1), 'blade')['geometry']
+            self.assertGreaterEqual(sword['length'], 1.32)
+            self.assertLessEqual(sword['length'], 1.72)
+            dagger = _part(generate_item('dagger', seed, 1), 'blade')['geometry']
+            self.assertGreaterEqual(dagger['length'], 0.44)
+            self.assertLessEqual(dagger['length'], 0.56)
+            mace = _part(generate_item('mace', seed, 1), 'grip')['geometry']['points'][-1][1]
+            self.assertGreaterEqual(mace, 0.92)
+            self.assertLessEqual(mace, 1.08)
+            axe = _part(generate_item('axe', seed, 1), 'grip')['geometry']['points'][-1][1]
+            self.assertGreaterEqual(axe, 1.0)
+            self.assertLessEqual(axe, 1.16)
+            hammer = _part(generate_item('hammer', seed, 1), 'grip')['geometry']['points'][-1][1]
+            self.assertGreaterEqual(hammer, 0.96)
+            self.assertLessEqual(hammer, 1.12)
+            spear = _part(generate_item('spear', seed, 1), 'shaft')['geometry']['height']
+            self.assertGreaterEqual(spear, 3.0)
+            self.assertLessEqual(spear, 3.32)
+            shield = _part(generate_item('shield', seed, 1), 'board')['geometry']
+            self.assertGreaterEqual(shield['width'], 1.0)
+            self.assertLessEqual(shield['width'], 1.68)
+            self.assertGreaterEqual(shield['height'], 1.0)
+            self.assertLessEqual(shield['height'], 1.84)
+            bow = _part(generate_item('bow', seed, 1), 'stave')['geometry']['curve']['from'][1]
+            self.assertGreaterEqual(bow, 1.24)
+            self.assertLessEqual(bow, 1.55)
+            torch = _part(generate_item('torch', seed, 1), 'shaft')['geometry']['points'][-1][1]
+            self.assertGreaterEqual(torch, 0.5)
+            self.assertLessEqual(torch, 0.56)
+        self.assertEqual(generate_item('sword', 1, 1)['combat']['range'], 3.8)
 
     def test_tier_raises_damage_for_weapons(self):
         for kind in ('sword', 'dagger', 'mace', 'axe', 'hammer', 'spear', 'bow'):

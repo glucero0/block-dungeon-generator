@@ -10,26 +10,26 @@ LEFT_HAND = frozenset({'torch', 'shield'})
 COMBAT_KINDS = frozenset({'sword', 'dagger', 'mace', 'axe', 'hammer', 'spear', 'bow'})
 
 MAX_REACH = {
-    'dagger': 0.7,
-    'sword': 1.45,
-    'mace': 1.2,
-    'axe': 1.2,
-    'hammer': 1.2,
-    'spear': 2.35,
+    'dagger': 1.4,
+    'sword': 2.9,
+    'mace': 2.4,
+    'axe': 2.4,
+    'hammer': 2.4,
+    'spear': 4.7,
     'torch': 1.0,
-    'shield': 1.2,
-    'bow': 1.95,
+    'shield': 2.4,
+    'bow': 3.9,
 }
 MIN_SPAN = {
-    'dagger': 0.3,
-    'sword': 0.75,
-    'mace': 0.5,
-    'axe': 0.5,
-    'hammer': 0.5,
-    'spear': 1.5,
+    'dagger': 0.6,
+    'sword': 1.5,
+    'mace': 1.0,
+    'axe': 1.0,
+    'hammer': 1.0,
+    'spear': 3.0,
     'torch': 0.5,
-    'shield': 0.45,
-    'bow': 1.1,
+    'shield': 0.9,
+    'bow': 2.2,
 }
 
 _ITEM_KEYS = frozenset({
@@ -153,7 +153,7 @@ def _geometry(geometry, label):
     kind = geometry.get('type')
     specs = {
         'box': (('width', 0.002, 2.5), ('height', 0.002, 2.5), ('depth', 0.002, 2.5)),
-        'cylinder': (('radiusTop', 0, 1.2), ('radiusBottom', 0, 1.2), ('height', 0.008, 2.5)),
+        'cylinder': (('radiusTop', 0, 1.2), ('radiusBottom', 0, 1.2), ('height', 0.008, 3.4)),
         'sphere': (('radius', 0.004, 0.6),),
         'cone': (('radius', 0.003, 0.5), ('height', 0.008, 0.8)),
         'torus': (('radius', 0.008, 1.2), ('tube', 0.002, 0.2)),
@@ -162,7 +162,7 @@ def _geometry(geometry, label):
             ('length', 0.05, 2.2), ('baseWidth', 0.008, 0.5), ('tipWidth', 0, 0.5),
             ('thickness', 0.003, 0.08), ('fuller', 0, 1),
         ),
-        'shield': (('width', 0.3, 1.2), ('height', 0.3, 1.3), ('thickness', 0.01, 0.12)),
+        'shield': (('width', 0.3, 1.7), ('height', 0.3, 1.9), ('thickness', 0.01, 0.12)),
         'tube': (('radius', 0.002, 0.08),),
     }
     wholes = {
@@ -213,7 +213,7 @@ def _geometry(geometry, label):
 
 
 def _part_corners(record):
-    position = _vec(record.get('position'), -3, 3, record.get('name', 'part'))
+    position = _vec(record.get('position'), -4, 4, record.get('name', 'part'))
     rotation = record.get('rotation')
     if rotation is None:
         angles = (0.0, 0.0, 0.0)
