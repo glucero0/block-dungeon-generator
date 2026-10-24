@@ -388,8 +388,8 @@
     function shieldGeometry(spec) {
       const outline = spec.outline;
       if (outline !== 'round' && outline !== 'heater' && outline !== 'tower') throw new Error(BUILD_ERROR);
-      const w = need(spec.width, 0.3, 1.2) / 2;
-      const h = need(spec.height, 0.3, 1.3) / 2;
+      const w = need(spec.width, 0.3, 1.7) / 2;
+      const h = need(spec.height, 0.3, 1.9) / 2;
       const thickness = need(spec.thickness, 0.01, 0.12);
       const shape = new THREE.Shape();
       if (outline === 'round') {
@@ -427,7 +427,7 @@
         case 'cylinder':
           return new THREE.CylinderGeometry(
             need(spec.radiusTop, 0, 1.2), need(spec.radiusBottom, 0, 1.2),
-            need(spec.height, 0.008, 2.5), whole(spec.radialSegments, 3, 32),
+            need(spec.height, 0.008, 3.4), whole(spec.radialSegments, 3, 32),
           );
         case 'sphere':
           return new THREE.SphereGeometry(need(spec.radius, 0.004, 0.6), whole(spec.widthSegments, 3, 32), whole(spec.heightSegments, 3, 24));
@@ -481,7 +481,7 @@
     }
 
     function place(object, part) {
-      const position = vec(part.position, -3, 3);
+      const position = vec(part.position, -4, 4);
       object.position.set(position[0], position[1], position[2]);
       if (part.rotation != null) {
         const rotation = part.rotation;
