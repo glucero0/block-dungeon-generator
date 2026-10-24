@@ -9,6 +9,8 @@ ruins, so the same viewer and loader code can read it.
 import math
 import re
 
+from creature_gen.species import SPECIES
+
 from . import structures
 from .approach import (
     DAY,
@@ -21,7 +23,7 @@ from .approach import (
     _vista_tree,
 )
 from .blocks import Block, Rect
-from .emit import _round, _sconce
+from .emit import _round, _sconce, creature_value, theme_value
 from .props import place_props
 from .seeding import sub_rng
 
@@ -559,12 +561,14 @@ def _spoke_transitions(spokes):
     return transitions
 
 
-def generate_hub(seed=1, spokes=None, names=None, structure=None, clutter=0.5):
+def generate_hub(seed=1, spokes=None, names=None, structure=None, clutter=0.5, theme=None, creature=None):
     """Build a hub document: one structure, a respawn point, and named spokes.
 
     `spokes` is 1 to 8 (default 3, or the number of `names`). `names` label the first spokes
     and the rest are called spoke-N. `structure` is one of `structures.names()`, or None to let
     the seed pick. `clutter` is 0 to 1 and scales interior props and scenery.
+    `theme` is 'stone', 'wood', or 'cave', or None to keep the structure's own theme.
+    `creature` is a species id recorded on the file. A hub still has no enemy spawns.
     """
     if not isinstance(seed, int) or isinstance(seed, bool):
         raise TypeError('seed must be an int')
@@ -575,8 +579,10 @@ def generate_hub(seed=1, spokes=None, names=None, structure=None, clutter=0.5):
     spoke_names = clean_names(names, spokes)
     if structure is not None and (not isinstance(structure, str) or structure not in structures.STRUCTURES):
         raise ValueError('structure must be one of: ' + ', '.join(structures.names()))
+    theme = theme_value(theme)
+    creature = creature_value(creature)
 
-    kind = structures.pick(structure, sub_rng(seed, 'hub', 'structure'))
+    kind = structures.with_theme(structures.pick(structure, sub_rng(seed, 'hub', 'structure')), theme)
     size_rng = sub_rng(seed, 'hub', 'size')
     width, depth = structures.footprint(kind, size_rng)
     cx = round(size_rng.uniform(-2.0, 2.0), 2)
@@ -620,11 +626,17 @@ def generate_hub(seed=1, spokes=None, names=None, structure=None, clutter=0.5):
     labels = {ZONE_HUB: 'The Hub'}
     if kind.enterable:
         labels[ZONE_INTERIOR] = kind.label
-    return {
+    document = {
         'seed': int(seed) & 0xFFFFFFFF,
         'kind': 'hub',
         'floors': 1,
-        'options': {'clutter': round(float(clutter), 3), 'structure': kind.type, 'spokes': spoke_names},
+        'options': {
+            'clutter': round(float(clutter), 3),
+            'structure': kind.type,
+            'spokes': spoke_names,
+            'theme': theme,
+            'creature': creature,
+        },
         'area': _round(width * depth),
         'rooms': rooms,
         'doors': [],
@@ -649,3 +661,6 @@ def generate_hub(seed=1, spokes=None, names=None, structure=None, clutter=0.5):
             'spokes': [_spoke_record(spoke) for spoke in spoke_list],
         },
     }
+    if creature is not None:
+        document['enemyName'] = SPECIES[creature]['title']
+    return document

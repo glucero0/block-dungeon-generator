@@ -8,6 +8,8 @@ import tempfile
 import unittest
 from pathlib import Path
 
+from creature_gen.species import SPECIES, SPECIES_IDS
+
 from blk_dungeon_gen import generate_hub, generate_layout
 from blk_dungeon_gen.__main__ import main
 from blk_dungeon_gen.approach import DRESSINGS, SCENERY_TYPES
@@ -300,7 +302,10 @@ class OptionTests(unittest.TestCase):
         first = generate_layout(4, density='high', clutter=0.8)
         again = generate_layout(4, density='high', clutter=0.8)
         self.assertEqual(first, again)
-        self.assertEqual(first['options'], {'density': 'high', 'clutter': 0.8})
+        self.assertEqual(first['options'], {
+            'density': 'high', 'clutter': 0.8, 'theme': None, 'creature': None,
+        })
+        self.assertNotIn('enemyName', first)
 
     def test_bad_options_are_rejected(self):
         for kwargs, error in (
@@ -310,6 +315,12 @@ class OptionTests(unittest.TestCase):
             ({'clutter': float('nan')}, ValueError),
             ({'clutter': 'lots'}, TypeError),
             ({'clutter': True}, TypeError),
+            ({'theme': 'marble'}, ValueError),
+            ({'theme': 1}, ValueError),
+            ({'theme': True}, ValueError),
+            ({'creature': 'dragon'}, ValueError),
+            ({'creature': 3}, ValueError),
+            ({'creature': True}, ValueError),
         ):
             with self.assertRaises(error):
                 generate_layout(1, **kwargs)
@@ -318,6 +329,149 @@ class OptionTests(unittest.TestCase):
         with contextlib.redirect_stderr(io.StringIO()):
             with self.assertRaises(SystemExit):
                 main(['--clutter', '2', '-o', 'unused.json'])
+
+
+class ThemeAndCreatureTests(unittest.TestCase):
+    def test_passages_stay_stone_until_a_theme_is_forced(self):
+        layout = generate_layout(1)
+        self.assertIsNone(layout['options']['theme'])
+        for room in layout['rooms']:
+            if room['block'] in ('entrance', 'hallway', 'doorway', 'stairwell'):
+                self.assertEqual(room['theme'], 'stone')
+        mixed = False
+        for seed in range(1, 8):
+            themes = {
+                room['theme'] for room in generate_layout(seed)['rooms']
+                if room['block'] not in ('entrance', 'hallway', 'doorway', 'stairwell')
+            }
+            if len(themes) > 1:
+                mixed = True
+                break
+        self.assertTrue(mixed)
+
+    def test_theme_dresses_every_room_and_keeps_the_shell(self):
+        plain = generate_layout(1, floors=2, chambers=8)
+        for theme in ('stone', 'wood', 'cave'):
+            dressed = generate_layout(1, floors=2, chambers=8, theme=theme)
+            again = generate_layout(1, floors=2, chambers=8, theme=theme)
+            self.assertEqual(dressed, again)
+            self.assertEqual(dressed['options']['theme'], theme)
+            self.assertTrue(all(room['theme'] == theme for room in dressed['rooms']))
+            self.assertEqual(dressed['doors'], plain['doors'])
+            for key in ('rect', 'sconce', 'floor', 'y', 'block'):
+                self.assertEqual(
+                    [room[key] for room in dressed['rooms']],
+                    [room[key] for room in plain['rooms']],
+                )
+            self.assertEqual(dressed['rooms'][0]['description'], {
+                'stone': 'A stone threshold under the arch. Pale daylight fails a few steps in, and the passage beyond is black.',
+                'wood': 'A timber threshold under the arch. Pale daylight fails a few steps in, and the passage beyond is black.',
+                'cave': 'A rock threshold under the arch. Pale daylight fails a few steps in, and the passage beyond is black.',
+            }[theme])
+            allowed = {kind.type for kind in PROPS[theme]}
+            for room in dressed['rooms']:
+                for prop in room['props']:
+                    self.assertIn(prop['type'], allowed)
+                if theme != 'cave':
+                    self.assertEqual(room['rocks'], [])
+
+    def test_cave_rooms_can_hold_rocks(self):
+        found = False
+        for seed in range(1, 6):
+            layout = generate_layout(seed, theme='cave', chambers=12)
+            if any(room['rocks'] for room in layout['rooms']):
+                found = True
+                break
+        self.assertTrue(found)
+
+    def test_creature_names_every_spawn_and_keeps_the_layout(self):
+        plain = generate_layout(1, floors=2, chambers=8)
+        for species in SPECIES_IDS:
+            populated = generate_layout(1, floors=1, chambers=2, creature=species)
+            self.assertEqual(populated['options']['creature'], species)
+            self.assertEqual(populated['enemyName'], SPECIES[species]['title'])
+        wolves = generate_layout(1, floors=2, chambers=8, creature='wolf')
+        again = generate_layout(1, floors=2, chambers=8, creature='wolf')
+        self.assertEqual(wolves, again)
+        self.assertEqual(wolves['enemyName'], 'Wolf')
+        self.assertGreater(sum(len(room['spawns']) for room in wolves['rooms']), 0)
+        copy = json.loads(json.dumps(wolves))
+        copy.pop('enemyName')
+        copy['options']['creature'] = None
+        self.assertEqual(copy, plain)
+
+    def test_theme_and_creature_together_are_deterministic(self):
+        first = generate_layout(4, theme='wood', creature='goblin', density='low', clutter=0.2)
+        again = generate_layout(4, theme='wood', creature='goblin', density='low', clutter=0.2)
+        self.assertEqual(first, again)
+        self.assertEqual(first['options']['theme'], 'wood')
+        self.assertEqual(first['options']['creature'], 'goblin')
+        self.assertTrue(all(room['theme'] == 'wood' for room in first['rooms']))
+
+    def test_hub_theme_overrides_material_and_keeps_the_plaza(self):
+        plain = generate_hub(1, structure='house', clutter=1.0)
+        stone = generate_hub(1, structure='house', clutter=1.0, theme='stone')
+        self.assertEqual(stone['options']['theme'], 'stone')
+        self.assertEqual(stone['structure']['theme'], 'stone')
+        self.assertEqual(stone['structure']['material'], 'stone')
+        self.assertEqual(stone['rooms'][0]['theme'], 'stone')
+        self.assertEqual(stone['hubArea'], plain['hubArea'])
+        self.assertEqual(stone['structure']['rect'], plain['structure']['rect'])
+        self.assertEqual(plain['structure']['material'], 'timber')
+        allowed = {kind.type for kind in PROPS['stone']}
+        self.assertGreater(len(stone['rooms'][0]['props']), 0)
+        for prop in stone['rooms'][0]['props']:
+            self.assertIn(prop['type'], allowed)
+        wood = generate_hub(1, structure='house', theme='wood')
+        self.assertEqual(wood['structure']['material'], 'timber')
+        tent = generate_hub(1, structure='tent', theme='wood')
+        self.assertEqual(tent['structure']['material'], 'canvas')
+        cave = generate_hub(2, structure='castle', theme='cave', clutter=1.0)
+        self.assertEqual(cave['structure']['material'], 'stone')
+        self.assertEqual(cave['rooms'][0]['theme'], 'cave')
+        cave_props = {kind.type for kind in PROPS['cave']}
+        for prop in cave['rooms'][0]['props']:
+            self.assertIn(prop['type'], cave_props)
+
+    def test_hub_records_a_creature_without_spawns(self):
+        house = generate_hub(1, structure='house', creature='bear')
+        self.assertEqual(house['enemyName'], 'Bear')
+        self.assertEqual(house['options']['creature'], 'bear')
+        self.assertEqual(house['rooms'][0]['spawns'], [])
+        camp = generate_hub(1, structure='campfire', creature='rat')
+        self.assertEqual(camp['enemyName'], 'Rat')
+        self.assertEqual(camp['rooms'], [])
+        self.assertIsNone(generate_hub(1)['options']['creature'])
+        for bad in ('dragon', 3, True):
+            with self.assertRaises(ValueError):
+                generate_hub(1, creature=bad)
+        with self.assertRaises(ValueError):
+            generate_hub(1, theme='marble')
+
+    def test_cli_writes_theme_and_creature(self):
+        with tempfile.TemporaryDirectory() as folder:
+            ruins = Path(folder) / 'ruins.json'
+            hub = Path(folder) / 'hub.json'
+            with contextlib.redirect_stdout(io.StringIO()):
+                main(['--seed', '1', '--theme', 'wood', '--creature', 'goblin', '-o', str(ruins)])
+                main(['--hub', '--seed', '1', '--structure', 'house', '--theme', 'stone', '--creature', 'orc',
+                      '-o', str(hub)])
+            ruin_doc = json.loads(ruins.read_text(encoding='utf-8'))
+            hub_doc = json.loads(hub.read_text(encoding='utf-8'))
+            self.assertEqual(ruin_doc['options']['theme'], 'wood')
+            self.assertEqual(ruin_doc['options']['creature'], 'goblin')
+            self.assertEqual(ruin_doc['enemyName'], 'Goblin')
+            self.assertTrue(all(room['theme'] == 'wood' for room in ruin_doc['rooms']))
+            self.assertEqual(hub_doc['structure']['material'], 'stone')
+            self.assertEqual(hub_doc['enemyName'], 'Orc')
+            self.assertEqual(ruin_doc, generate_layout(1, theme='wood', creature='goblin'))
+            self.assertEqual(hub_doc, generate_hub(1, structure='house', theme='stone', creature='orc'))
+
+    def test_cli_rejects_unknown_theme_and_creature(self):
+        for argv in (['--theme', 'marble'], ['--creature', 'dragon'], ['--hub', '--theme', 'brick']):
+            with contextlib.redirect_stderr(io.StringIO()):
+                with self.assertRaises(SystemExit, msg=str(argv)):
+                    main(argv + ['-o', 'unused.json'])
 
 
 def _inside(point_x, point_z, rect, slack=0.0):

@@ -2,6 +2,8 @@
 
 import math
 
+from creature_gen.species import SPECIES, SPECIES_IDS
+
 from .approach import build_approach, entrance_door_width
 from .assemble import assemble
 from .blocks import STORY, polygon_of
@@ -20,9 +22,13 @@ NAMES = {
     'cave': ['Cave Bend', 'Damp Gallery', 'Low Cave', 'Echo Cave', 'Cave Crypt', 'Black Hollow'],
 }
 
-ENTRANCE_DESCRIPTION = (
-    'A stone threshold under the arch. Pale daylight fails a few steps in, and the passage beyond is black.'
-)
+THEMES = tuple(NAMES)
+
+ENTRANCE_DESCRIPTION = {
+    'stone': 'A stone threshold under the arch. Pale daylight fails a few steps in, and the passage beyond is black.',
+    'wood': 'A timber threshold under the arch. Pale daylight fails a few steps in, and the passage beyond is black.',
+    'cave': 'A rock threshold under the arch. Pale daylight fails a few steps in, and the passage beyond is black.',
+}
 EXIT_DESCRIPTION = 'The last chamber. The way back to daylight is the arch you already passed through.'
 
 
@@ -32,6 +38,24 @@ def _round(value):
 
 def _point(x, z):
     return [_round(x), _round(z)]
+
+
+def theme_value(theme):
+    """None, or one of stone, wood, cave."""
+    if theme is None:
+        return None
+    if not isinstance(theme, str) or theme not in THEMES:
+        raise ValueError('theme must be one of: ' + ', '.join(THEMES))
+    return theme
+
+
+def creature_value(creature):
+    """None, or a species id from creature_gen."""
+    if creature is None:
+        return None
+    if not isinstance(creature, str) or creature not in SPECIES:
+        raise ValueError('creature must be one of: ' + ', '.join(SPECIES_IDS))
+    return creature
 
 
 def _name_for(theme, used, rng):
@@ -256,7 +280,18 @@ def _avoid_points(spawns, rocks, chest, sconce):
     return avoid
 
 
-def emit(layout, rng, seed, floors, density='normal', clutter=0.5):
+def _room_theme(block, themes, forced):
+    """Passages stay stone unless `forced` dresses the whole dungeon."""
+    if forced is not None:
+        return forced
+    if block.block in ('entrance', 'hallway', 'doorway', 'stairwell'):
+        return 'stone'
+    return themes[id(block)]
+
+
+def emit(layout, rng, seed, floors, density='normal', clutter=0.5, theme=None, creature=None):
+    # Always draw the mixed deck so a forced theme does not shift later random choices.
+    forced = theme
     themes = _themes(layout.blocks, rng)
     depths = depth_fractions(layout)
     used_names = {'Antechamber'}
@@ -268,9 +303,7 @@ def emit(layout, rng, seed, floors, density='normal', clutter=0.5):
     by_id = {}
     rooms = []
     for block in layout.blocks:
-        theme = 'stone' if block.block in ('entrance', 'hallway', 'doorway', 'stairwell') else themes[id(block)]
-        if block.block == 'exit':
-            theme = themes[id(block)]
+        theme = _room_theme(block, themes, forced)
         story = STORY * 2 if block.block == 'stairwell' else STORY
         if block.block == 'entrance':
             name = 'Antechamber'
@@ -314,7 +347,7 @@ def emit(layout, rng, seed, floors, density='normal', clutter=0.5):
         if block.role:
             room['role'] = block.role
         if block.block == 'entrance':
-            room['description'] = ENTRANCE_DESCRIPTION
+            room['description'] = ENTRANCE_DESCRIPTION[theme]
         elif block.block == 'exit':
             room['description'] = EXIT_DESCRIPTION
         if theme == 'cave':
@@ -341,10 +374,15 @@ def emit(layout, rng, seed, floors, density='normal', clutter=0.5):
     exit_gate, exit_area, exit_labels, exit_transitions = build_exit(
         layout, exit_block, sub_rng(seed, 'exit'), clutter, outdoors['transitions'])
     area = sum(block.rect.w * block.rect.d for block in layout.blocks)
-    return {
+    document = {
         'seed': int(seed) & 0xFFFFFFFF,
         'floors': floors,
-        'options': {'density': density, 'clutter': round(float(clutter), 3)},
+        'options': {
+            'density': density,
+            'clutter': round(float(clutter), 3),
+            'theme': forced,
+            'creature': creature,
+        },
         'area': area,
         'rooms': rooms,
         'doors': doors,
@@ -365,15 +403,20 @@ def emit(layout, rng, seed, floors, density='normal', clutter=0.5):
         'exitGate': exit_gate,
         'exitArea': exit_area,
     }
+    if creature is not None:
+        document['enemyName'] = SPECIES[creature]['title']
+    return document
 
 
-def generate_layout(seed=1, floors=2, chambers=8, density='normal', clutter=0.5):
+def generate_layout(seed=1, floors=2, chambers=8, density='normal', clutter=0.5, theme=None, creature=None):
     """Build a full Ancient Ruins document.
 
     `chambers` counts the entrance, the exit, T hubs, and other rooms.
     Stairwells, hallways, and doorways are extra structure and are not counted.
     `density` is 'low', 'normal', or 'high' and scales enemy spawns.
     `clutter` is 0 to 1 and scales room props and outdoor scenery.
+    `theme` is 'stone', 'wood', or 'cave', or None to mix chamber themes.
+    `creature` is a species id, or None to leave the spawns unnamed.
     """
     if not isinstance(seed, int) or isinstance(seed, bool):
         raise TypeError('seed must be an int')
@@ -387,5 +430,7 @@ def generate_layout(seed=1, floors=2, chambers=8, density='normal', clutter=0.5)
         raise TypeError('clutter must be a number')
     if not math.isfinite(clutter) or clutter < 0 or clutter > 1:
         raise ValueError('clutter must be from 0 to 1')
+    theme = theme_value(theme)
+    creature = creature_value(creature)
     layout, rng = assemble(seed, floors, chambers)
-    return emit(layout, rng, seed, floors, density, clutter)
+    return emit(layout, rng, seed, floors, density, clutter, theme, creature)

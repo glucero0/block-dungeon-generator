@@ -1,15 +1,18 @@
 """Write a generated Ancient Ruins or hub JSON file.
 
     python -m blk_dungeon_gen --seed 1 --floors 2 --chambers 8 --density normal --clutter 0.5 -o out/ruins.json
-    python -m blk_dungeon_gen --hub --seed 1 --structure house --spoke ruins --spoke forest -o out/hub.json
+    python -m blk_dungeon_gen --seed 1 --theme stone --creature wolf -o out/ruins.json
+    python -m blk_dungeon_gen --hub --seed 1 --structure house --theme wood --spoke ruins --spoke forest -o out/hub.json
 """
 
 import argparse
 import json
 from pathlib import Path
 
+from creature_gen.species import SPECIES_IDS
+
 from .density import DENSITY
-from .emit import generate_layout
+from .emit import THEMES, generate_layout
 from .hub import generate_hub
 from .structures import names as structure_names
 
@@ -24,6 +27,10 @@ def main(argv=None):
                         help='enemy spawn density (default: normal)')
     parser.add_argument('--clutter', type=float, default=0.5,
                         help='room props and outdoor scenery, 0 to 1 (default: 0.5)')
+    parser.add_argument('--theme', choices=THEMES, default=None,
+                        help='force stone, wood, or cave (default: mixed rooms, or the hub structure\'s own theme)')
+    parser.add_argument('--creature', choices=SPECIES_IDS, default=None,
+                        help='species placed on every ruin spawn, such as wolf (default: unset)')
     parser.add_argument('--hub', action='store_true',
                         help='write a starting hub instead of ruins (ignores --floors, --chambers, --density)')
     parser.add_argument('--structure', choices=structure_names(), default=None,
@@ -43,15 +50,24 @@ def main(argv=None):
     if args.hub:
         try:
             layout = generate_hub(args.seed, spokes=args.spokes, names=args.spoke,
-                                  structure=args.structure, clutter=args.clutter)
+                                  structure=args.structure, clutter=args.clutter,
+                                  theme=args.theme, creature=args.creature)
         except (TypeError, ValueError) as error:
             parser.error(str(error))
         summary = (f'hub: {layout["structure"]["type"]}, {len(layout["hubArea"]["spokes"])} spokes, '
                    f'seed {layout["seed"]}')
     else:
-        layout = generate_layout(args.seed, floors=args.floors, chambers=args.chambers,
-                                 density=args.density, clutter=args.clutter)
+        try:
+            layout = generate_layout(args.seed, floors=args.floors, chambers=args.chambers,
+                                     density=args.density, clutter=args.clutter,
+                                     theme=args.theme, creature=args.creature)
+        except (TypeError, ValueError) as error:
+            parser.error(str(error))
         summary = f'{len(layout["rooms"])} rooms, {layout["floors"]} floors, seed {layout["seed"]}'
+    if args.theme:
+        summary += f', theme {args.theme}'
+    if args.creature:
+        summary += f', creature {args.creature}'
     path = Path(args.output)
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(layout, indent=2) + '\n', encoding='utf-8')

@@ -47,9 +47,25 @@ FIRE_RADIUS = 1.1
 SEAT_RING = 2.7
 SEATS = 4
 
+# A cave interior has no cloth or timber shell, so the walls stay stone.
+THEME_MATERIALS = {'stone': 'stone', 'wood': 'timber', 'cave': 'stone'}
+
 
 def names():
     return sorted(STRUCTURES)
+
+
+def with_theme(kind, theme):
+    """Dress `kind` in `theme`. None, or the kind's own theme, leaves its material alone.
+
+    A tent is already wood and stays canvas. A campfire is already wood and stays logs.
+    `stone` and `cave` use stone walls. `wood` on a stone structure uses timber.
+    """
+    if theme is None or theme == kind.theme:
+        return kind
+    if theme not in THEME_MATERIALS:
+        raise ValueError('theme must be one of: ' + ', '.join(THEME_MATERIALS))
+    return kind._replace(theme=theme, material=THEME_MATERIALS[theme])
 
 
 def pick(forced, rng):
